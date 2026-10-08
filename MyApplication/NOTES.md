@@ -25,10 +25,10 @@ Release merged manifest permissions: CAMERA only (INTERNET/ACCESS_NETWORK_STATE 
 ## Design notes
 - Excel and backup read from one DEFERRED read transaction on a WAL reader connection: consistent snapshot without blocking sales.
 - Backup file `.cncbak` = zip(manifest.json with SHA-256 + snapshot SQLite db). Restore validates checksum, schema version, integrity_check and ledger reconciliation, makes a safety copy (app storage, last 3 kept), then swaps the file atomically.
-- Search uses SQL `LIKE` over an indexed table (not FTS); measure at 100k variants and switch to FTS4 if p95 > 500 ms.
+- Search uses SQL `LIKE` over an indexed table (not FTS); measured at 100k variants on the emulator: Stock search p95 299 ms, Products 104 ms (2026-10-08), so FTS is not needed yet. Switch to FTS4 if a real phone exceeds 500 ms.
 
 ## Not done / not verified yet
-- Tests: 26 JVM + 28 instrumented, all passing on emulator API 37 (2026-10-08). Still missing: capacity/performance tests (20k–100k variants), full restore swap-in test, scanner tests with real labels.
+- Tests: 26 JVM + 28 instrumented, all passing on emulator API 37 (2026-10-08). 10k and 100k stress runs pass (scripts/stress.sh). Still missing: full restore swap-in test, scanner tests with real labels.
 - Schema v2 adds `variants.notes` (AutoMigration 1→2, covered by MigrationTest). Every future bump needs a migration + test; schemas are in `app/schemas`.
 - `kotlinx-serialization-core` is pinned to 1.8.1 via a constraint because room-testing needs it.
 - Not run on any device or emulator: camera recognition, latency, battery/thermal, offline first launch and printing are all **unverified**.

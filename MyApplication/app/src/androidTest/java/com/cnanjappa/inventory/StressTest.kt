@@ -52,17 +52,18 @@ class StressTest {
         val companies = listOf("Ramraj", "Udyam", "Puma", "Siyaram", "Raymond")
         val names = listOf("Shirt", "Dhoti", "Kurta", "Vest", "Trouser", "Banian", "Towel", "Lungi", "Jeans", "Polo")
         val sizes = listOf("38", "40")
-        val n = 10_000
+        val args = InstrumentationRegistry.getArguments()
+        val n = args.getString("products")?.toInt() ?: 10_000
         val ids = LongArray(n)
         val expected = IntArray(n)
         val codes = Array(n) { "SKU-%06d".format(it) }
 
-        // 1. Seed: 2,500 product groups x 2 sizes x Full/Half = 10,000 variants, each with its own barcode.
+        // 1. Seed: n/4 product groups x 2 sizes x Full/Half = n variants, each with its own barcode.
         val seedStart = System.nanoTime()
         for (i in 0 until n) {
             val g = i / 4
             val input = VariantInput(
-                companies[g % companies.size], names[g % names.size], "M%04d".format(g),
+                companies[g % companies.size], names[g % names.size], "M%05d".format(g),
                 if (g % 3 == 0) "Cream" else "White", sizes[(i / 2) % 2], if (i % 2 == 0) Sleeve.FULL else Sleeve.HALF,
             )
             val qty = if (i % 10 == 0) 0 else rnd.nextInt(1, 21)
@@ -126,7 +127,7 @@ class StressTest {
         }
 
         // 4. Search first page (what the Stock/Products screens load) for hits, rare terms and misses.
-        val queries = listOf("shirt", "ramraj kurta", "m1234", "cream 40", "puma", "m0001", "m2499", "polo half", "zzz-none", "towel")
+        val queries = listOf("shirt", "ramraj kurta", "m01234", "cream 40", "puma", "m00001", "m24999", "polo half", "zzz-none", "towel")
         repeat(300) {
             val q = InventoryRepository.likePattern(queries[it % queries.size])
             timed("search (stock groups)") { repo.dao.groupsPaged(q).load(PagingSource.LoadParams.Refresh(null, 50, false)) }
@@ -136,7 +137,7 @@ class StressTest {
         // 5. Excel and backup at 10k products.
         val xlsx = File(ctx.cacheDir, "stress.xlsx")
         timed("excel export (full)") { ExcelReport(repo.db).write(xlsx) {} }
-        val bak = File(ctx.cacheDir, "stress.cncbak")
+        val bak = File(ctx.getExternalFilesDir(null), "stress.cncbak")  // kept for restoring into the preview app
         timed("backup (full)") { ctx.container.backup().backupTo(Uri.fromFile(bak)) }
 
         // 6. Correctness: ledger reconciles and every quantity matches the independent model.
@@ -157,6 +158,6 @@ class StressTest {
         report("dbSize=%.1fMB wal=%.1fMB xlsx=%.1fMB backup=%.1fMB".format(
             dbFile.length() / 1e6, File(dbFile.path + "-wal").length() / 1e6, xlsx.length() / 1e6, bak.length() / 1e6))
         report("javaHeapUsed=%.1fMB nativeHeap=%.1fMB".format((rt.totalMemory() - rt.freeMemory()) / 1e6, Debug.getNativeHeapAllocatedSize() / 1e6))
-        xlsx.delete(); bak.delete()
+        xlsx.delete()
     }
 }

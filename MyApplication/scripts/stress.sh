@@ -1,14 +1,16 @@
 #!/bin/bash
 # 10,000-product stress run on the connected emulator/phone. Uses only the .debug test app
 # (its data is cleared first); the shop app's data is never touched.
-#   scripts/stress.sh [ui_seconds=300]
+#   [PRODUCTS=10000] [SKIP_DB=1] scripts/stress.sh [ui_seconds=300]
+# Leaves a backup of the seeded data at /sdcard/Android/data/$PKG/files/stress.cncbak
 # Report: test-results/stress-<timestamp>.txt
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export JAVA_HOME="${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}"
 ADB="${ADB:-$HOME/Library/Android/sdk/platform-tools/adb}"
-PKG=com.cnanjappa.inventory.debug
+PKG=${PKG:-com.cnanjappa.inventory.debug}   # PKG=com.cnanjappa.inventory with SKIP_DB=1 measures the preview build
 UI_SECS=${1:-300}
+PRODUCTS=${PRODUCTS:-10000}
 mkdir -p test-results
 OUT="test-results/stress-$(date +%Y%m%d-%H%M).txt"
 log() { echo "$*" | tee -a "$OUT"; }
@@ -19,15 +21,15 @@ if [ -z "${SKIP_DB:-}" ]; then   # SKIP_DB=1 reruns phases 2-4 on the already se
 ./gradlew -q :app:installDebug :app:installDebugAndroidTest
 $ADB shell pm clear $PKG >/dev/null
 
-log; log "## 1. Database stress: 10,000 products (seed, mixed ops, races, search, Excel, backup, reconciliation)"
+log; log "## 1. Database stress: $PRODUCTS products (seed, mixed ops, races, search, Excel, backup, reconciliation)"
 $ADB logcat -c
 RUNNER=$($ADB shell pm list instrumentation | grep "$PKG" | sed 's/instrumentation:\([^ ]*\).*/\1/' | tr -d '\r')
-RES=$($ADB shell am instrument -w -e stress true -e class com.cnanjappa.inventory.StressTest "$RUNNER")
+RES=$($ADB shell am instrument -w -e stress true -e products $PRODUCTS -e class com.cnanjappa.inventory.StressTest "$RUNNER")
 $ADB logcat -d -s STRESS:I -v raw | grep -v '^-' | tee -a "$OUT" || true
 echo "$RES" | grep -q "OK (1 test)" && log "RESULT: PASS" || { log "RESULT: FAIL"; echo "$RES" | tail -20 | tee -a "$OUT"; exit 1; }
 fi
 
-log; log "## 2. UI on 10,000 products for ${UI_SECS}s (debug build: frame times are pessimistic vs release)"
+log; log "## 2. UI on $PRODUCTS products for ${UI_SECS}s ($PKG)"
 $ADB shell dumpsys battery unplug
 $ADB shell dumpsys batterystats --reset >/dev/null
 $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1

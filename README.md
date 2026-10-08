@@ -71,24 +71,26 @@ SKIP_DB=1 scripts/stress.sh 300   # rerun the UI, idle and random-tap phases wit
 
 It adds 10,000 products to the `.debug` app, then runs 5,000 stock changes, sale races, searches, an Excel export and a backup. It checks every quantity against its own count, then scrolls the app, checks it in the background and does 3,000 random taps.
 
-Results on the emulator (API 37, 8 Oct 2026):
+Results on the emulator (API 37, 8 Oct 2026). Times are typical / 95th percentile:
 
-| Action | Typical | 95th percentile | Worst |
-|---|---|---|---|
-| Scan + sell | 1.8 ms | 6 ms | 76 ms |
-| Return / undo / restock | 1–1.5 ms | 3–4 ms | 41 ms |
-| Stock tab search | 10 ms | 20 ms | 99 ms |
-| Products search | 6 ms | 10 ms | 20 ms |
-| Adding one product | 2.7 ms | 11 ms | 114 ms |
-| Full Excel export / backup | 3.4 s / 3.2 s | | |
+| Action | 10,000 products | 100,000 products |
+|---|---|---|
+| Scan + sell | 1.8 / 6 ms | 1.9 / 5 ms |
+| Return / undo / restock | 1–1.5 / 3–4 ms | 1.4–1.5 / 2–5 ms |
+| Stock tab search | 10 / 20 ms | 217 / 299 ms |
+| Products search | 6 / 10 ms | 69 / 104 ms |
+| Full Excel export / backup | 3.4 s / 3.2 s | 23 s / 22 s |
+| Database / Excel / backup size | 9.9 / 1.0 / 3.1 MB | 80 / 7.9 / 22 MB |
 
-- **Correctness:** 0 stock mismatches, stock history matches every quantity, and each of 50 "last piece" races sold exactly once. A repeated tap did not sell twice.
-- **Size:** database 9.9 MB, Excel file 1.0 MB, backup 3.1 MB. The app used about 18 MB of Java memory and 25 MB of native memory.
-- **Stability:** 3,000 random taps and swipes, with no crash and no "app not responding".
-- **Battery (estimate):** nonstop scrolling used 23% of one CPU core. On a phone with a 5,000 mAh battery that is about 0.5–2% per hour from the app; the screen itself uses more, about 3–8% per hour. In the background the app uses no CPU, holds no wakelocks and has the camera closed. The emulator has no real battery, so these figures need checking on a phone.
-- **Smoothness:** on the debug build, 19–29% of frames were late (95th percentile 77–85 ms). Debug builds stutter, so this overstates it; the optimised `preview` build has not yet been measured with 10,000 products.
+- **Correctness at both sizes:** 0 stock mismatches, stock history matches every quantity, and each of 50 "last piece" races sold exactly once. A repeated tap did not sell twice.
+- **Search:** at 100,000 products the slowest search is 299 ms for 1 in 20 searches, under the 500 ms limit, so switching to full-text search is not needed yet. The Stock tab search is the slowest part because it totals sizes across all products for every search.
+- **Stability:** 3,000 random taps and swipes at each size, with no crash and no "app not responding". Memory stayed at about 20 MB Java and 25 MB native.
+- **Battery (estimate):** nonstop scrolling used 13–23% of one CPU core at 10,000 products and 41% at 100,000. On a phone with a 5,000 mAh battery, 10,000 products works out to about 0.5–2% per hour from the app; the screen itself uses more, about 3–8% per hour. In the background the app uses no CPU, holds no wakelocks and has the camera closed. The emulator has no real battery, so these figures need checking on a phone.
+- **Smoothness:** inconclusive on the emulator. Many frames are late on both builds (52% optimised `preview`, 64% debug, in the same test). The optimised build halves the frames slowed by app code; most of the rest come from the emulator's graphics layer. Needs measuring on a real phone.
 
-**Not yet verified:** a real phone (battery, heat, smoothness), the camera on real labels, printing, and 100,000 products.
+To test the optimised build with stress data, restore `/sdcard/Android/data/com.cnanjappa.inventory.debug/files/stress.cncbak` in the app (Menu → Backup → Restore backup), then run `SKIP_DB=1 PKG=com.cnanjappa.inventory scripts/stress.sh 180`.
+
+**Not yet verified:** a real phone (battery, heat, smoothness), the camera on real labels, and printing.
 
 ## Project layout
 
