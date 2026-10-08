@@ -1,2 +1,4 @@
 .kotlin
 .idea/
+.DS_Store
+MyApplication/test-results/
