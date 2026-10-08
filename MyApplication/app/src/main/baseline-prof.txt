@@ -1,0 +1,5 @@
+# Startup/first-screen code compiled ahead of time on install (via profileinstaller), so the opening
+# animation and the hand-over to Home do not stutter while the JIT warms up. Library profiles
+# (Compose, Room, Navigation...) are merged in automatically.
+HSPLcom/cnanjappa/inventory/**->**(**)**
+Lcom/cnanjappa/inventory/**;
