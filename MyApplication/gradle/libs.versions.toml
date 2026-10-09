@@ -15,6 +15,7 @@ sqlite = "2.6.2"
 paging = "3.3.6"
 camerax = "1.6.2"
 zxing = "3.5.4"
+mlkitBarcode = "17.3.0"
 splash = "1.2.0"
 icons = "1.7.8"
 serialization = "1.8.1"
@@ -50,6 +51,7 @@ camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", versi
 camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 kotlinx-serialization-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-core", version.ref = "serialization" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+mlkit-barcode = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

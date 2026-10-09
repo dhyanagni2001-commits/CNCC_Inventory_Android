@@ -75,7 +75,8 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     var model by field("model", "")
     var colour by field("colour", "")
     var size by field("size", "")
-    var sleeve by mutableStateOf(handle.get<String>("sleeve")?.let { Sleeve.valueOf(it) })
+    // Full is the usual case, so a new product starts on Full; Half is one tap.
+    var sleeve by mutableStateOf(handle.get<String>("sleeve")?.let { Sleeve.valueOf(it) } ?: Sleeve.FULL)
     var qty by field("qty", 0)
     var notes by field("notes", "")
     var code by mutableStateOf(handle.get<String>("codeRaw")?.let { ScannedCode(it, handle["codeFmt"] ?: Codes.TYPED) })

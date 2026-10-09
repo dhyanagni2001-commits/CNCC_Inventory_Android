@@ -1,15 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- White shirt with the blue "CN" monogram, scaled to sit inside the 66dp adaptive-icon safe zone. -->
+<!-- Themed (Material You) icon: shirt only, since themed icons are one colour and would hide the monogram. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
     <group android:pivotX="54" android:pivotY="55" android:scaleX="0.84" android:scaleY="0.84">
         <path android:pathData="M44,30 L33,34 L24,48 L32,53 L36,47 L36,80 L72,80 L72,47 L76,53 L84,48 L75,34 L64,30 Q54,39 44,30 Z"
             android:fillColor="#FFFFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="3" android:strokeLineJoin="round" />
-        <path android:pathData="M53.4,56.6 A7,7 0 1,0 53.4,67.4"
-            android:strokeColor="#FF1E3A8A" android:strokeWidth="4.5" android:strokeLineCap="round" />
-        <path android:pathData="M58,71 L58,53 L67,71 L67,53"
-            android:strokeColor="#FF1E3A8A" android:strokeWidth="4.5"
-            android:strokeLineCap="round" android:strokeLineJoin="round" />
     </group>
 </vector>

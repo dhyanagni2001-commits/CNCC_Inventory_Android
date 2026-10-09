@@ -3,42 +3,40 @@ package com.cnanjappa.inventory.scan
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.cnanjappa.inventory.domain.ScannedCode
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.BinaryBitmap
-import com.google.zxing.DecodeHintType
-import com.google.zxing.MultiFormatReader
-import com.google.zxing.NotFoundException
-import com.google.zxing.PlanarYUVLuminanceSource
-import com.google.zxing.ReaderException
-import com.google.zxing.common.HybridBinarizer
-import com.google.zxing.multi.GenericMultipleBarcodeReader
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.barcode.BarcodeScanner
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.common.InputImage
 
 /**
- * Decodes the scan-box region of each analysis frame with the bundled ZXing core. Works directly on
- * the Y plane into one reused buffer (no per-frame bitmaps). Odd frames are transposed so 1D labels
- * held sideways still read. Reports every frame: an empty list means "no label visible", which the
- * scanner uses to know a held label has left the frame.
+ * Decodes each analysis frame with the bundled ML Kit barcode model (offline, no Play services). It
+ * reads tilted, slightly blurred and on-screen labels in any orientation, so a label is usually picked
+ * up within a frame or two. Only codes whose centre is inside the on-screen scan box count. Reports
+ * every frame: an empty list means "no label visible", which the scanner uses to know a held label
+ * has left the frame.
  */
 class BarcodeAnalyzer(
     private val minIntervalMs: () -> Long,
     private val onFrame: (List<ScannedCode>) -> Unit,
 ) : ImageAnalysis.Analyzer {
-    private val hints = mapOf(
-        DecodeHintType.POSSIBLE_FORMATS to FORMATS,
-        DecodeHintType.CHARACTER_SET to "UTF-8",
-    )
-    private val reader = MultiFormatReader().apply { setHints(hints) }
-    private val multi = GenericMultipleBarcodeReader(reader)
-    private var buffer = ByteArray(0)
+    private val scanner = newScanner()
     private var lastRun = 0L
-    private var frame = 0L
 
+    @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
     override fun analyze(image: ImageProxy) {
         try {
             val now = System.currentTimeMillis()
             if (now - lastRun < minIntervalMs()) return
             lastRun = now
-            onFrame(decode(image, transpose = (frame++ % 2L) == 1L))
+            val media = image.image ?: return
+            val rot = image.imageInfo.rotationDegrees
+            val found = Tasks.await(scanner.process(InputImage.fromMediaImage(media, rot)))
+            // ML Kit reports boxes in the upright image.
+            val w = if (rot % 180 == 0) image.width else image.height
+            val h = if (rot % 180 == 0) image.height else image.width
+            onFrame(inScanBox(found, w, h))
         } catch (_: Exception) {
             // A bad frame must never stop scanning; the next frame is tried.
         } finally {
@@ -46,55 +44,33 @@ class BarcodeAnalyzer(
         }
     }
 
-    private fun decode(image: ImageProxy, transpose: Boolean): List<ScannedCode> {
-        val plane = image.planes[0]
-        val data = plane.buffer
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride
-        val w = image.width
-        val h = image.height
-        val rot = (image.imageInfo.rotationDegrees + if (transpose) 90 else 0) % 360
-        // Scan box in display orientation: centre 80% width x 50% height (matches the on-screen frame).
-        val dispW = if (rot % 180 == 0) w else h
-        val dispH = if (rot % 180 == 0) h else w
-        val boxW = (dispW * 0.8f).toInt()
-        val boxH = (dispH * 0.5f).toInt()
-        val x0 = (dispW - boxW) / 2
-        val y0 = (dispH - boxH) / 2
-        if (buffer.size < boxW * boxH) buffer = ByteArray(boxW * boxH)
-        var o = 0
-        for (dy in 0 until boxH) {
-            val y = y0 + dy
-            for (dx in 0 until boxW) {
-                val x = x0 + dx
-                val bx: Int
-                val by: Int
-                when (rot) {
-                    90 -> { bx = y; by = h - 1 - x }
-                    180 -> { bx = w - 1 - x; by = h - 1 - y }
-                    270 -> { bx = w - 1 - y; by = x }
-                    else -> { bx = x; by = y }
-                }
-                buffer[o++] = data.get(by * rowStride + bx * pixelStride)
-            }
-        }
-        val bitmap = BinaryBitmap(HybridBinarizer(PlanarYUVLuminanceSource(buffer, boxW, boxH, 0, 0, boxW, boxH, false)))
-        return try {
-            val first = reader.decodeWithState(bitmap)
-            // Only when something was found: check for other labels in view so two labels never sell.
-            val all = try { multi.decodeMultiple(bitmap, hints).toList() } catch (_: NotFoundException) { listOf(first) }
-            (all + first).map { ScannedCode(it.text, it.barcodeFormat.name) }.distinctBy { it.key }
-        } catch (_: ReaderException) {
-            emptyList()
-        } finally {
-            reader.reset()
-        }
-    }
+    fun close() = scanner.close()
 
     companion object {
-        val FORMATS = listOf(
-            BarcodeFormat.EAN_13, BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
-            BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.QR_CODE, BarcodeFormat.DATA_MATRIX,
+        private val FORMATS = mapOf(
+            Barcode.FORMAT_EAN_13 to "EAN_13", Barcode.FORMAT_EAN_8 to "EAN_8",
+            Barcode.FORMAT_UPC_A to "UPC_A", Barcode.FORMAT_UPC_E to "UPC_E",
+            Barcode.FORMAT_CODE_128 to "CODE_128", Barcode.FORMAT_CODE_39 to "CODE_39",
+            Barcode.FORMAT_QR_CODE to "QR_CODE", Barcode.FORMAT_DATA_MATRIX to "DATA_MATRIX",
         )
+
+        fun newScanner(): BarcodeScanner = BarcodeScanning.getClient(
+            BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_EAN_13, Barcode.FORMAT_EAN_8, Barcode.FORMAT_UPC_A, Barcode.FORMAT_UPC_E,
+                    Barcode.FORMAT_CODE_128, Barcode.FORMAT_CODE_39, Barcode.FORMAT_QR_CODE, Barcode.FORMAT_DATA_MATRIX)
+                .build(),
+        )
+
+        /**
+         * Scan box: centre 80% width x 50% height of the upright frame (matches the on-screen frame).
+         * Format names stay ZXing's, as stored barcodes and lookup keys use them.
+         */
+        fun inScanBox(found: List<Barcode>, w: Int, h: Int): List<ScannedCode> = found.mapNotNull { b ->
+            val raw = b.rawValue ?: return@mapNotNull null
+            val format = FORMATS[b.format] ?: return@mapNotNull null
+            val box = b.boundingBox
+            if (box != null && (box.exactCenterX() !in w * 0.1f..w * 0.9f || box.exactCenterY() !in h * 0.25f..h * 0.75f)) return@mapNotNull null
+            ScannedCode(raw, format)
+        }.distinctBy { it.key }
     }
 }

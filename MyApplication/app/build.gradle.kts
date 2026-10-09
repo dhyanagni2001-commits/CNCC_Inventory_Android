@@ -30,6 +30,9 @@ android {
             optimization {
                 enable = true
             }
+            // Real phones are ARM; leaving out the x86 emulator copies of the native scanner/SQLite
+            // libraries keeps the APK small. Debug builds keep all ABIs for the emulator.
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         }
         // Separate app id: debug installs and connectedAndroidTest (which uninstalls after running)
         // can never touch the data of the preview/release app on the same phone.
@@ -40,6 +43,9 @@ android {
             optimization {
                 enable = true
             }
+            // Real phones are ARM; leaving out the x86 emulator copies of the native scanner/SQLite
+            // libraries keeps the APK small. Debug builds keep all ABIs for the emulator.
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         }
     }
     compileOptions {
@@ -84,6 +90,8 @@ dependencies {
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)
     implementation(libs.zxing.core)
+    // Bundled ML Kit model: scans offline, no Google Play services or download needed.
+    implementation(libs.mlkit.barcode)
     ksp(libs.room.compiler)
     constraints {
         // room-testing needs 1.8.x; the test classpath is pinned to the app's, so align it here.

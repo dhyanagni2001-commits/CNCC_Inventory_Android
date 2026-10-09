@@ -66,6 +66,7 @@ fun CameraScanner(
         if (!active) return@DisposableEffect onDispose {}
         var disposed = false
         var provider: ProcessCameraProvider? = null
+        var analyzer: BarcodeAnalyzer? = null
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             if (disposed) return@addListener
@@ -80,7 +81,8 @@ fun CameraScanner(
                     )
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
-                analysis.setAnalyzer(executor, BarcodeAnalyzer(minIntervalMs) { codes -> if (!disposed) frameCallback(codes) })
+                analyzer = BarcodeAnalyzer(minIntervalMs) { codes -> if (!disposed) frameCallback(codes) }
+                analysis.setAnalyzer(executor, analyzer!!)
                 p.unbindAll()
                 val cam = p.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
                 camera = cam
@@ -93,6 +95,8 @@ fun CameraScanner(
             disposed = true
             camera?.cameraControl?.enableTorch(false)
             provider?.unbindAll()
+            // Close on the analysis thread so it never races a frame still being decoded.
+            analyzer?.let { a -> runCatching { executor.execute { a.close() } } }
             camera = null
         }
     }
