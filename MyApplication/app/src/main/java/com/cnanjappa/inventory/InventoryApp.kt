@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import com.cnanjappa.inventory.data.AppDatabase
 import com.cnanjappa.inventory.data.InventoryRepository
+import com.cnanjappa.inventory.export.AutoBackup
 import com.cnanjappa.inventory.export.Backup
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +21,7 @@ class InventoryApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = Container(this)
+        AutoBackup.schedule(this)
     }
 }
 

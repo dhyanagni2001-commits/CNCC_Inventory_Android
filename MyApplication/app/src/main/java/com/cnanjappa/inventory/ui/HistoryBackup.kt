@@ -41,6 +41,7 @@ import com.cnanjappa.inventory.MainActivity
 import com.cnanjappa.inventory.data.HistoryRow
 import com.cnanjappa.inventory.data.InventoryRepository
 import com.cnanjappa.inventory.data.MoveType
+import com.cnanjappa.inventory.export.AutoBackup
 import com.cnanjappa.inventory.export.BackupException
 import com.cnanjappa.inventory.export.BackupInfo
 import kotlinx.coroutines.Dispatchers
@@ -180,7 +181,8 @@ fun BackupScreen(nav: NavHostController) {
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { vm.pick(it) }
     SubScreen("Backup", { nav.popBackStack() }) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = BodyArrangement) {
-            Text("Keep a backup outside this phone. Uninstalling the app or losing the phone can lose local data.", fontSize = 17.sp)
+            Text("The app backs up automatically every night around ${AutoBackup.HOUR - 12} PM, if anything changed, to ${AutoBackup.locationText()}. The last 14 are kept.", fontSize = 17.sp)
+            Text("Copy a backup to a computer or another phone now and then. Losing this phone loses the backups on it.", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Last backup: " + (last?.toLongOrNull()?.let { fmt.format(Date(it)) } ?: "never"), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             vm.working?.let { MessageCard(Msg(Tone.INFO, it)) { LinearProgressIndicator(Modifier.fillMaxWidth()) } }
             vm.msg?.let { MessageCard(it) }

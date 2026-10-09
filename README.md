@@ -16,6 +16,7 @@ Screenshots are from the emulator with demo data. The scanner shows the emulator
 - **Products:** company, name, model, colour, size and Full/Half sleeve, with optional notes.
 - **Stock:** add stock, or correct it with a reason. Search all stock, with a size breakdown.
 - **Exports:** Excel stock report, barcode label PDF, and checked backup and restore.
+- **Automatic backup:** every night around 11 PM, if anything changed, to `Download/CNCC Backups` on the phone (visible in the Files app, kept if the app is uninstalled). The last 14 are kept. Copy one off the phone now and then.
 
 ## How it works
 
@@ -74,10 +75,10 @@ Some bugs only appear after R8 shrinks the app, and the normal tests run on the 
 
 ```bash
 ./gradlew :app:testDebugUnitTest          # 26 unit tests, no device needed
-./gradlew :app:connectedDebugAndroidTest  # 30 device tests, needs an emulator or phone
+./gradlew :app:connectedDebugAndroidTest  # 31 device tests, needs an emulator or phone
 ```
 
-All 56 tests pass on the emulator (API 37); the opt-in demo and stress tests skip themselves. The tests run in a separate `.debug` app, so they never touch real shop data.
+All 57 tests pass on the emulator (API 37); the opt-in demo and stress tests skip themselves. The tests run in a separate `.debug` app, so they never touch real shop data.
 
 ### Stress test (10,000 products)
 

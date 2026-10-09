@@ -108,6 +108,7 @@ dependencies {
     implementation(libs.zxing.core)
     // Bundled ML Kit model: scans offline, no Google Play services or download needed.
     implementation(libs.mlkit.barcode)
+    implementation(libs.work.runtime)
     ksp(libs.room.compiler)
     constraints {
         // room-testing needs 1.8.x; the test classpath is pinned to the app's, so align it here.

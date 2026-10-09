@@ -51,13 +51,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import com.cnanjappa.inventory.Container
-import com.cnanjappa.inventory.data.InventoryRepository
 import com.cnanjappa.inventory.export.ExcelReport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -75,12 +73,6 @@ sealed interface ExcelState {
 
 class HomeViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, handle) {
     val total = repo.dao.totalPieces().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
-    /** Gentle reminder: changes since the last backup and the last backup is over a day old. */
-    val backupDue = combine(repo.dao.lastChange(), repo.dao.observeSetting(InventoryRepository.KEY_LAST_BACKUP)) { change, last ->
-        val lastTs = last?.toLongOrNull() ?: 0L
-        change != null && change > lastTs && System.currentTimeMillis() - lastTs > 24 * 3600_000L
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     var excel by mutableStateOf<ExcelState>(ExcelState.Idle)
         private set
@@ -136,7 +128,6 @@ fun HomeScreen(nav: NavHostController) {
     val vm = appViewModel { c, h -> HomeViewModel(c, h) }
     val context = LocalContext.current
     val total by vm.total.collectAsStateWithLifecycle()
-    val backupDue by vm.backupDue.collectAsStateWithLifecycle()
     val saveExcel = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(XLSX_MIME)) { vm.saveExcel(context, it) }
     val excel = vm.excel
     LaunchedEffect(excel) {
@@ -196,9 +187,6 @@ fun HomeScreen(nav: NavHostController) {
                     TextButton(onClick = { nav.navigate("stock") { launchSingleTop = true } }) { Text("View stock") }
                 }
             }
-        }
-        if (backupDue) MessageCard(Msg(Tone.INFO, "Back up today", "Keep a copy outside this phone.")) {
-            SecondaryButton("Back up data", { nav.navigate(Routes.BACKUP) })
         }
     }
 }
