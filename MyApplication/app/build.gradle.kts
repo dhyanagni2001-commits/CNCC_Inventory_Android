@@ -29,6 +29,7 @@ android {
             matchingFallbacks += "release"
             optimization {
                 enable = true
+                keepRules { files.add(file("proguard-rules.pro")) }
             }
             // Real phones are ARM; leaving out the x86 emulator copies of the native scanner/SQLite
             // libraries keeps the APK small. Debug builds keep all ABIs for the emulator.
@@ -42,6 +43,7 @@ android {
         release {
             optimization {
                 enable = true
+                keepRules { files.add(file("proguard-rules.pro")) }
             }
             // Real phones are ARM; leaving out the x86 emulator copies of the native scanner/SQLite
             // libraries keeps the APK small. Debug builds keep all ABIs for the emulator.
