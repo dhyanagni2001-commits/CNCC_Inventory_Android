@@ -58,14 +58,26 @@ adb install -r app/build/outputs/apk/preview/app-preview.apk
 
 The release APK (`./gradlew :app:assembleRelease`) must be signed with the shop's own key. This repository contains no keys.
 
+Each release build copies its APK and R8 mapping file to `MyApplication/release-artifacts/<version>/`. Keep that folder for every version you hand out: crash reports from that version can only be read with its mapping file. The installed version is shown at the bottom of the app's menu (⋮).
+
+### Smoke test of the optimised build
+
+```bash
+cd MyApplication
+scripts/smoke.sh                            # builds preview, installs over the app (data kept), checks it
+APK=path/to/signed-release.apk scripts/smoke.sh   # same checks on the signed release
+```
+
+Some bugs only appear after R8 shrinks the app, and the normal tests run on the debug build, so run this before every release. It opens the main screens, starts the scanner, builds the Excel report and checks for crashes. It changes no stock. Report saved in `test-results/`.
+
 ## Tests
 
 ```bash
 ./gradlew :app:testDebugUnitTest          # 26 unit tests, no device needed
-./gradlew :app:connectedDebugAndroidTest  # 28 device tests, needs an emulator or phone
+./gradlew :app:connectedDebugAndroidTest  # 30 device tests, needs an emulator or phone
 ```
 
-All 54 tests pass on the emulator (API 37). The tests run in a separate `.debug` app, so they never touch real shop data.
+All 56 tests pass on the emulator (API 37); the opt-in demo and stress tests skip themselves. The tests run in a separate `.debug` app, so they never touch real shop data.
 
 ### Stress test (10,000 products)
 
@@ -96,7 +108,7 @@ Results on the emulator (API 37, 8 Oct 2026). Times are typical / 95th percentil
 
 To test the optimised build with stress data, restore `/sdcard/Android/data/com.cnanjappa.inventory.debug/files/stress.cncbak` in the app (Menu → Backup → Restore backup), then run `SKIP_DB=1 PKG=com.cnanjappa.inventory scripts/stress.sh 180`.
 
-**Not yet verified:** a real phone (battery, heat, smoothness), the camera on real labels, and printing.
+**Not yet verified:** battery, heat and smoothness on a real phone, scanning real garment labels, and printing. The app and scanner do run on a Samsung Galaxy M32 (Android 13).
 
 ## Project layout
 
@@ -108,6 +120,8 @@ MyApplication/app/src/main/java/com/cnanjappa/inventory/
 ├── export/   Excel, labels, backup
 └── ui/       screens
 ```
+
+Release readiness, check by check: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Still needed before release: the shop's signing key, and tests of labels and printing.
 
 For more detail, see [MyApplication/NOTES.md](MyApplication/NOTES.md) and [android_inventory_requirements.md](android_inventory_requirements.md).
 

@@ -70,6 +70,20 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// Every release build keeps its APK and R8 mapping in release-artifacts/<version>/ (outside build/, so
+// `clean` never deletes it). Keep that folder with the APK: crash stack traces need it to be read.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        val output = variant.outputs.single()
+        val keep = tasks.register<Copy>("keepReleaseMapping") {
+            from(variant.artifacts.get(com.android.build.api.artifact.SingleArtifact.OBFUSCATION_MAPPING_FILE))
+            from(variant.artifacts.get(com.android.build.api.artifact.SingleArtifact.APK)) { include("*.apk") }
+            into(rootProject.layout.projectDirectory.dir(output.versionName.zip(output.versionCode) { n, c -> "release-artifacts/$n-$c" }))
+        }
+        tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach { finalizedBy(keep) }
+    }
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

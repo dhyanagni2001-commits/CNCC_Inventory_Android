@@ -14,9 +14,9 @@ The app records piece counts only: no prices, money, imports, networking or acco
 
 ## Blockers before release
 1. **Release APK is unsigned.** It needs the shop's own key (1.4, 1.14).
-2. **R8 mapping files are not archived.** Crashes in the release build can't be decoded (1.13, 19.10).
-3. **No automated smoke test on the optimised build.** Today's scanner bug appeared only in optimised builds (18.6).
-4. **The app doesn't show its version** (19.2).
+2. ~~Mapping files not archived~~ Fixed: kept in `release-artifacts/` (1.13).
+3. ~~No smoke test on the optimised build~~ Fixed: `scripts/smoke.sh` (18.6).
+4. ~~App doesn't show its version~~ Fixed: shown in the menu (19.2).
 5. **Label PDF and printed labels are untested** (6.12–6.14). Real-label scanning on the phone has not been reported yet (6.5).
 
 ## 1. Build and release
@@ -34,7 +34,7 @@ The app records piece counts only: no prices, money, imports, networking or acco
 |1.10|Test screens/sample data removed|Pass|C|Demo and stress data exist only in `androidTest`|
 |1.11|Production config|Pass|C|No config needed; INTERNET permission removed|
 |1.12|R8 doesn't break scan/DB/exports|Fail|E,P|Scanning broke under R8 and is now fixed (keep rules); the scanner test passes on R8 code. Database, Excel and backup are Not tested on the R8 build|
-|1.13|Mapping files retained|Fail|B|Only in `build/`, which `clean` deletes|
+|1.13|Mapping files retained|Pass|B|Each release build copies its APK and mapping to `release-artifacts/<version>/` (git-ignored; keep it with the APK)|
 |1.14|Signed release tested on devices|Not tested|—|Needs 1.4|
 
 ## 2. Installation and upgrades
@@ -159,7 +159,7 @@ The app records piece counts only: no prices, money, imports, networking or acco
 |9.7|Unicode/leading zeros/long names|Pass|B|XlsxWriter tests|
 |9.8|No formula injection|Pass|B|`userTextIsNeverAFormula`|
 |9.9–9.13|Import checks|N/A|C|No import|
-|9.14|File-picker cancel harmless|Not tested|—||
+|9.14|File-picker cancel harmless|Pass|E,P|Smoke test: cancelled Excel save shows "Excel not saved"; app stays usable|
 |9.15|Low storage/write failure|Not tested|—||
 |9.16|Sharing permissions|Pass|C|FileProvider for the labels cache only, temporary read grant|
 
@@ -267,7 +267,7 @@ The app records piece counts only: no prices, money, imports, networking or acco
 |18.3|Export/backup integration tests|Pass|B,E||
 |18.4|UI tests for key journeys|Fail|—|Only launch and navigation; no sell or return UI test|
 |18.5|Regression tests for found bugs|Fail|—|Today's R8 scanner bug and no-back-camera bug have no tests|
-|18.6|Release-build smoke tests|Fail|—|None automated|
+|18.6|Release-build smoke tests|Pass|E,P|`scripts/smoke.sh`: launch, menu version, Products, Stock, scanner start and decoding, Excel, cancelled save, crashes. Passes on E and P; fails as it should when the ML Kit fix is removed|
 |18.7|Stress tests|Pass|E|10k and 100k|
 |18.8|Failure tests (storage, permission, interruption)|Fail|—|Missing|
 |18.9|Disposable test data|Pass|C|Separate `.debug` app|
@@ -277,12 +277,12 @@ The app records piece counts only: no prices, money, imports, networking or acco
 | # | Check | Result | Dev | Evidence |
 |---|---|---|---|---|
 |19.1|Install instructions accurate|Pass|B|README (needs JAVA_HOME, as written)|
-|19.2|User can see app version|Fail|C|Not shown anywhere in the app|
+|19.2|User can see app version|Pass|E,P|Bottom of the menu (⋮): "Version 1.0 (1)"|
 |19.3|Screenshots match app|Pass|E|README screenshots from the real app|
 |19.4, 19.5, 19.8|Store requirements, data declarations, diagnostics data|N/A|C|Sideloaded; no data collection|
 |19.6|Pilot group|Not tested|—||
 |19.7|Crash reports/diagnostics|Fail|—|No crash log or diagnostics export|
 |19.9|Release notes|Fail|—|None|
-|19.10|Old artifacts and mapping kept|Fail|—|See 1.13|
+|19.10|Old artifacts and mapping kept|Pass|B|See 1.13|
 |19.11|Faulty-update recovery plan|Fail|—|Not written (back up first, reinstall previous APK)|
 |19.12|Users know backup/restore/report|Fail|C|Backup reminder in the app; no way to report problems documented|

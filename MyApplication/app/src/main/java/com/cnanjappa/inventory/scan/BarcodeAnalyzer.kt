@@ -1,5 +1,6 @@
 package com.cnanjappa.inventory.scan
 
+import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.cnanjappa.inventory.domain.ScannedCode
@@ -23,6 +24,7 @@ class BarcodeAnalyzer(
 ) : ImageAnalysis.Analyzer {
     private val scanner = newScanner()
     private var lastRun = 0L
+    private var loggedFailure = false
 
     @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
     override fun analyze(image: ImageProxy) {
@@ -37,8 +39,10 @@ class BarcodeAnalyzer(
             val w = if (rot % 180 == 0) image.width else image.height
             val h = if (rot % 180 == 0) image.height else image.width
             onFrame(inScanBox(found, w, h))
-        } catch (_: Exception) {
-            // A bad frame must never stop scanning; the next frame is tried.
+        } catch (e: Exception) {
+            // A bad frame must never stop scanning; the next frame is tried. The first failure is
+            // logged so a decoder that always fails (e.g. broken by R8) is visible to scripts/smoke.sh.
+            if (!loggedFailure) { loggedFailure = true; Log.w("BarcodeAnalyzer", "Frame decode failed", e) }
         } finally {
             image.close()
         }

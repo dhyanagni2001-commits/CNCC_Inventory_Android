@@ -1,5 +1,6 @@
 package com.cnanjappa.inventory.ui
 
+import androidx.core.content.pm.PackageInfoCompat
 import android.net.Uri
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
@@ -227,6 +228,8 @@ fun MainNav() {
                             onClick = { menu = false; nav.navigate(Routes.HISTORY) })
                         DropdownMenuItem(text = { Text("Backup", fontSize = 17.sp) }, leadingIcon = { Icon(Icons.Default.Backup, null) },
                             onClick = { menu = false; nav.navigate(Routes.BACKUP) })
+                        // Lets staff tell support exactly which build is installed.
+                        DropdownMenuItem(text = { Text(appVersion(), fontSize = 14.sp) }, onClick = {}, enabled = false)
                     }
                 },
             )
@@ -310,4 +313,13 @@ val BodyArrangement = Arrangement.spacedBy(14.dp)
 private fun Modifier.drawTopHairline(): Modifier {
     val c = MaterialTheme.colorScheme.outlineVariant
     return drawBehind { drawLine(c, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1.dp.toPx()) }
+}
+
+@Composable
+private fun appVersion(): String {
+    val context = LocalContext.current
+    return remember {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        "Version ${info.versionName} (${PackageInfoCompat.getLongVersionCode(info)})"
+    }
 }
