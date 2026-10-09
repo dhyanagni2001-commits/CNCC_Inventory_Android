@@ -2,6 +2,12 @@
 
 Offline Android app for a clothing shop. Scan a garment's barcode to sell it, add products and stock, record returns, and export Excel reports, labels and backups. No internet, account or subscription needed.
 
+| Home | Sell (scanner) | Products | Stock | Product |
+|---|---|---|---|---|
+| <img src="docs/screenshots/home.png" width="160"> | <img src="docs/screenshots/scan.png" width="160"> | <img src="docs/screenshots/products.png" width="160"> | <img src="docs/screenshots/stock.png" width="160"> | <img src="docs/screenshots/product.png" width="160"> |
+
+Screenshots are from the emulator with demo data. The scanner shows the emulator's virtual room in place of a real camera.
+
 ## Features
 
 - **Sell by scanning:** each scan sells exactly 1 piece, with Undo.
@@ -15,7 +21,7 @@ Offline Android app for a clothing shop. Scan a garment's barcode to sell it, ad
 
 ```mermaid
 flowchart LR
-    Cam["Camera scan<br/>(CameraX + ZXing)"] --> UI
+    Cam["Camera scan<br/>(CameraX + ML Kit, offline)"] --> UI
     UI["Screens<br/>(Jetpack Compose)"] --> VM[ViewModels]
     VM --> Repo["InventoryRepository<br/>single path for every stock change"]
     Repo --> DB[("Room / SQLite<br/>stock + history<br/>triggers block bad data")]

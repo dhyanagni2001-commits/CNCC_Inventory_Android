@@ -74,6 +74,7 @@ import com.cnanjappa.inventory.data.Resolution
 import com.cnanjappa.inventory.data.Variant
 import com.cnanjappa.inventory.domain.Codes
 import com.cnanjappa.inventory.domain.ScannedCode
+import com.cnanjappa.inventory.scan.CameraProblem
 import com.cnanjappa.inventory.scan.CameraScanner
 import com.cnanjappa.inventory.scan.Power
 import kotlinx.coroutines.Dispatchers
@@ -94,7 +95,7 @@ sealed interface ScanState {
     data object Scanning : ScanState
     data object Checking : ScanState
     data class Paused(val text: String, val warm: Boolean = false) : ScanState
-    data object CameraError : ScanState
+    data class CameraError(val problem: CameraProblem) : ScanState
     data class Sold(val variant: Variant, val remaining: Int, val saleId: Long) : ScanState
     data class Undone(val variant: Variant, val remaining: Int, val qty: Int) : ScanState
     data class Failed(val msg: Msg, val retry: Variant? = null) : ScanState
@@ -188,7 +189,10 @@ class ScanViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         startIdle()
     }
 
-    fun cameraFailed() { state = ScanState.CameraError; torchOn = false }
+    fun cameraFailed(problem: CameraProblem) {
+        if (state != ScanState.Scanning) return
+        state = ScanState.CameraError(problem); torchOn = false; hint = null; idleJob?.cancel()
+    }
 
     /** Called on the analyzer thread for every analysed frame. */
     fun onFrame(codes: List<ScannedCode>) {
@@ -367,7 +371,7 @@ fun ScanScreen(nav: NavHostController) {
                 return@Column
             }
             when (val s = vm.state) {
-                ScanState.Scanning, is ScanState.Paused, ScanState.CameraError -> CameraBox(vm, s)
+                ScanState.Scanning, is ScanState.Paused, is ScanState.CameraError -> CameraBox(vm, s)
                 ScanState.Checking -> MessageCard(Msg(Tone.INFO, "Checking…"))
                 is ScanState.Sold -> SoldCard(s) {
                     BigButton("Scan next", vm::scanNext, container = Color.White, content = successColor())
@@ -433,7 +437,7 @@ private fun CameraBox(vm: ScanViewModel, s: ScanState) {
         Box(Modifier.fillMaxWidth(0.8f).aspectRatio(0.8f * 3f / (0.5f * 4f)).border(BorderStroke(3.dp, Color.White), RoundedCornerShape(12.dp)))
         when (s) {
             is ScanState.Paused -> Overlay(s.text)
-            ScanState.CameraError -> Overlay("Camera unavailable — tap to retry")
+            is ScanState.CameraError -> Overlay(s.problem.text)
             else -> {}
         }
     }
