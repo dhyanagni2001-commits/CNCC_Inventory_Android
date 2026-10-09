@@ -127,6 +127,7 @@ fun CameraScanner(
 }
 
 /** Back camera first, then an external camera, then any other (usually front). */
+@androidx.annotation.OptIn(androidx.camera.core.ExperimentalLensFacing::class)
 private fun pickCamera(p: ProcessCameraProvider): CameraSelector? {
     val cams = p.availableCameraInfos
     return (cams.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_BACK }
