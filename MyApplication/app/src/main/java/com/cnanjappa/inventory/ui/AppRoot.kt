@@ -241,7 +241,9 @@ fun MainNav() {
                                 nav.navigate(r) {
                                     popUpTo(nav.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
-                                    restoreState = true
+                                    // Never restore Home: if screens were open above it (e.g. Sell → Find product),
+                                    // that pop saves them under Home and restoring would put them straight back.
+                                    restoreState = r != Routes.HOME
                                 }
                             },
                             icon = { Icon(icon, null) },
