@@ -64,11 +64,18 @@ interface InventoryDao {
         sizeKey: String, sizeSort: Int, sleeve: String, identityKey: String, groupKey: String, search: String, notes: String,
     )
 
-    @Query("UPDATE variants SET archived = :archived WHERE id = :id")
-    suspend fun setArchived(id: Long, archived: Boolean)
+    /** Deleting keeps the row for History but frees its identity, so the same item can be added again. */
+    @Query("UPDATE variants SET archived = 1, identityKey = 'deleted:' || id WHERE id = :id")
+    suspend fun markDeleted(id: Long)
+
+    @Query("DELETE FROM aliases WHERE variantId = :variantId")
+    suspend fun deleteAliasesOf(variantId: Long)
+
+    @Query("SELECT `key` FROM alias_candidates WHERE variantId = :variantId")
+    suspend fun candidateKeysOf(variantId: Long): List<String>
 
     @Query(
-        """SELECT * FROM variants WHERE search LIKE :q ESCAPE '\'
+        """SELECT * FROM variants WHERE archived = 0 AND search LIKE :q ESCAPE '\'
         ORDER BY name COLLATE NOCASE, company COLLATE NOCASE, model COLLATE NOCASE, colour COLLATE NOCASE, sizeSort, sizeLabel, sleeve""",
     )
     fun variantsPaged(q: String): PagingSource<Int, Variant>

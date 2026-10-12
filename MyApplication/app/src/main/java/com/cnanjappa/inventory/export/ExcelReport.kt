@@ -112,8 +112,8 @@ class ExcelReport(private val db: AppDatabase) {
             row("As of", DateCell(asOf))
             row("Timezone", zone.id)
             row("Products (company/product/model/colour)", counts[0])
-            row("Variants (incl. archived)", counts[1])
-            row("Archived variants", counts[3].coerceAtLeast(0))
+            row("Variants (incl. deleted)", counts[1])
+            row("Deleted variants", counts[3].coerceAtLeast(0))
             row("Pieces in stock", counts[2])
             row("Linked barcodes", counts[4])
             row("Movement totals cover", if (counts[5] < 0) "No movements yet" else "All recorded history")
@@ -163,7 +163,7 @@ class ExcelReport(private val db: AppDatabase) {
     private suspend fun PooledConnection.each(sql: String, rowFn: (SQLiteStatement) -> Unit) =
         usePrepared(sql) { s -> while (s.step()) rowFn(s) }
 
-    private fun status(archived: Long) = if (archived != 0L) "Archived" else "Active"
+    private fun status(archived: Long) = if (archived != 0L) "Deleted" else "Active"
 }
 
 private fun SQLiteStatement.t(i: Int): String = if (isNull(i)) "" else getText(i)

@@ -66,7 +66,7 @@ class ListViewModel(c: Container, handle: SavedStateHandle) : ViewModel() {
         Pager(PAGING) { dao.variantsPaged(InventoryRepository.likePattern(q)) }.flow
     }.cachedIn(viewModelScope)
 
-    /** Stock tab: every item still sold or holding pieces (archived items with pieces left stay visible). */
+    /** Stock tab: every item except deleted ones (an old archived item that still holds pieces stays visible). */
     val stock = debounced.flatMapLatest { q ->
         Pager(PAGING) { dao.stockPaged(InventoryRepository.likePattern(q)) }.flow
     }.cachedIn(viewModelScope)
@@ -139,7 +139,7 @@ private fun ItemRow(v: Variant, onEdit: (() -> Unit)?, onClick: () -> Unit) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(v.title, style = MaterialTheme.typography.titleMedium)
                 Text(listOf("Size ${v.sizeLabel}", v.sleeve, v.colour).filter { it.isNotEmpty() }.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (v.archived) Text("Archived", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                if (v.archived) Text("Deleted", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
             }
             Text(
                 "${v.qty}", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 12.dp),

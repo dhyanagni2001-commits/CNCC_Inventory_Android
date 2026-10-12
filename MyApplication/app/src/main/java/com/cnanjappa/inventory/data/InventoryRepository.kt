@@ -78,7 +78,8 @@ class InventoryRepository(val db: AppDatabase) {
         }
         val catalog = InternalCode.catalogOf(code.raw)
         if (catalog != null && catalog == catalog()) {
-            dao.variantByCode(code.raw)?.let { return@withContext Resolution.One(it) }
+            // A deleted item's printed app labels no longer find it.
+            dao.variantByCode(code.raw)?.takeIf { !it.archived }?.let { return@withContext Resolution.One(it) }
         }
         Resolution.Unknown
     }
@@ -175,6 +176,7 @@ class InventoryRepository(val db: AppDatabase) {
     suspend fun undoSale(opId: String, saleId: Long): OpResult = runOp(opId, "UNDO", "$saleId") {
         val sale = dao.sale(saleId) ?: throw Reject(Code.NOT_FOUND)
         val n = sale.remaining
+        if (dao.variant(sale.variantId)?.archived == true) throw Reject(Code.ARCHIVED, sale.variantId)
         if (n <= 0 || dao.addReversed(saleId, n) != 1) throw Reject(Code.LIMIT, sale.variantId)
         if (dao.increment(sale.variantId, n, MAX_QTY) != 1) throw Reject(Code.INVALID, sale.variantId)
         val v = dao.variant(sale.variantId)!!
@@ -190,6 +192,7 @@ class InventoryRepository(val db: AppDatabase) {
         runOp(opId, "RETURN", "$variantId|$saleId|$qty|$damaged") {
             if (qty !in 1..MAX_QTY) throw Reject(Code.INVALID)
             val v = dao.variant(variantId) ?: throw Reject(Code.NOT_FOUND)
+            if (v.archived) throw Reject(Code.ARCHIVED, variantId)
             val sale = (if (saleId != null) dao.sale(saleId) else dao.newestEligibleSale(variantId))
                 ?: throw Reject(Code.NO_SALE, variantId)
             if (sale.variantId != variantId) throw Reject(Code.INVALID, variantId)
@@ -220,6 +223,7 @@ class InventoryRepository(val db: AppDatabase) {
         runOp(opId, "CORRECT", "$variantId|$expected|$newQty|$reason") {
             if (newQty !in 0..MAX_QTY || reason.isBlank()) throw Reject(Code.INVALID)
             val v = dao.variant(variantId) ?: throw Reject(Code.NOT_FOUND)
+            if (v.archived) throw Reject(Code.ARCHIVED, variantId)
             if (dao.setQty(variantId, expected, newQty) != 1) throw Reject(Code.STALE, variantId)
             val delta = newQty - expected
             dao.insertMovement(Movement(opId = opId, variantId = variantId, type = MoveType.ADJUST, delta = delta, qty = kotlin.math.abs(delta), ts = now(), note = reason, description = v.description))
@@ -297,7 +301,8 @@ class InventoryRepository(val db: AppDatabase) {
         "$variantId|${v.identityKey}|${notes.hashCode()}|$expectedQty|$newQty|${add.joinToString(",") { it.key }}|${removeKeys.joinToString(",")}",
     ) {
         if (newQty !in 0..MAX_QTY) throw Reject(Code.INVALID)
-        dao.variant(variantId) ?: throw Reject(Code.NOT_FOUND)
+        val current = dao.variant(variantId) ?: throw Reject(Code.NOT_FOUND)
+        if (current.archived) throw Reject(Code.ARCHIVED, variantId)
         dao.variantByIdentity(v.identityKey)?.takeIf { it.id != variantId }?.let { throw Reject(Code.DUPLICATE, it.id) }
         dao.updateDetails(
             variantId, v.company, v.name, v.model, v.colour, v.size.label, v.size.key, v.size.sort,
@@ -323,8 +328,28 @@ class InventoryRepository(val db: AppDatabase) {
         OpResult(Code.OK, variantId, newQty, qty = newQty - expectedQty)
     }
 
-    suspend fun setArchived(variantId: Long, archived: Boolean) =
-        withContext(NonCancellable + Dispatchers.IO) { dao.setArchived(variantId, archived) }
+    /**
+     * Deletes an item for good: it leaves stock, search and scanning, and its barcodes and identity
+     * are freed for reuse. Pieces left are written off to 0 as a "Deleted" correction so totals stay
+     * right; refused (STALE) if stock moved since the user saw [expectedQty]. The row itself stays so
+     * past sales keep their place in History and Excel.
+     */
+    suspend fun deleteItem(opId: String, variantId: Long, expectedQty: Int): OpResult =
+        runOp(opId, "DELETE", "$variantId|$expectedQty") {
+            val v = dao.variant(variantId) ?: throw Reject(Code.NOT_FOUND)
+            if (v.archived) return@runOp OpResult(Code.OK, variantId, 0)
+            if (expectedQty > 0) {
+                if (dao.setQty(variantId, expectedQty, 0) != 1) throw Reject(Code.STALE, variantId)
+                dao.insertMovement(Movement(opId = opId, variantId = variantId, type = MoveType.ADJUST, delta = -expectedQty, qty = expectedQty, ts = now(), note = "Deleted", description = v.description))
+            } else if (v.qty != 0) throw Reject(Code.STALE, variantId)
+            dao.deleteAliasesOf(variantId)
+            for (key in dao.candidateKeysOf(variantId)) {
+                dao.deleteCandidate(key, variantId)
+                if (dao.candidateCount(key) == 0) dao.deleteAlias(key)
+            }
+            dao.markDeleted(variantId)
+            OpResult(Code.OK, variantId, 0, qty = -expectedQty)
+        }
 
     suspend fun setSetting(key: String, value: String) = withContext(Dispatchers.IO) { dao.putSetting(Setting(key, value)) }
 

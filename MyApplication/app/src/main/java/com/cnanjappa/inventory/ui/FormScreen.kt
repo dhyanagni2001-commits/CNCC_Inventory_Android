@@ -68,7 +68,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-data class Saved(val id: Long, val qty: Int, val labels: Boolean)
+data class Saved(val id: Long, val qty: Int)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, handle) {
@@ -89,7 +89,6 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     var code by mutableStateOf(handle.get<String>("codeRaw")?.let { ScannedCode(it, handle["codeFmt"] ?: Codes.TYPED) })
     var codeStatus by mutableStateOf<String?>(null)
     var shareCode by field("share", false)
-    var withLabels by field("withLabels", false)
     var errors by mutableStateOf<List<FieldError>>(emptyList())
     var saved by mutableStateOf<Saved?>(null)
     var duplicateOf by mutableStateOf<Long?>(null)
@@ -136,8 +135,8 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
             }
         } else if (isEdit) viewModelScope.launch { original = repo.dao.variant(editId); initial = snapshot() }
         code?.let { checkCode(it) }
-        recover(KEY) { r -> saved = Saved(r.variantId!!, r.qty ?: 0, withLabels) }
-        recover(KEY_EDIT) { saved = Saved(editId, 0, false) }
+        recover(KEY) { r -> saved = Saved(r.variantId!!, r.qty ?: 0) }
+        recover(KEY_EDIT) { saved = Saved(editId, 0) }
     }
 
     private fun snapshot() = listOf(company, name, model, colour, size, sleeve?.name, qty, code?.key, codes.map { it.key }, notes)
@@ -147,7 +146,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     fun persist() {
         handle["company"] = company; handle["name"] = name; handle["model"] = model; handle["colour"] = colour
         handle["size"] = size; handle["notes"] = notes; handle["sleeve"] = sleeve?.name; handle["qty"] = qty; handle["share"] = shareCode
-        handle["withLabels"] = withLabels; handle["codeRaw"] = code?.raw; handle["codeFmt"] = code?.format
+        handle["codeRaw"] = code?.raw; handle["codeFmt"] = code?.format
         handle["codesRaw"] = ArrayList(codes.map { it.raw }); handle["codesFmt"] = ArrayList(codes.map { it.format })
     }
 
@@ -229,7 +228,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
             val newQty = qty
             op(KEY_EDIT, { repo.editItem(it, editId, nv, cleanNotes, originalQty, newQty, add, remove) }) { r ->
                 when (r.code) {
-                    Code.OK -> { saved = Saved(editId, 0, false); msg = null }
+                    Code.OK -> { saved = Saved(editId, 0); msg = null }
                     Code.DUPLICATE -> { duplicateOf = r.variantId; msg = failMsg(r.code) }
                     Code.LABEL_TAKEN -> msg = Msg(Tone.ERROR, "Label belongs to another item", "Remove that barcode, then save again.")
                     // A sale or restock happened meanwhile: show the real count, keep the typed one to re-check.
@@ -243,10 +242,9 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
             }
             return
         }
-        val labels = withLabels
         op(KEY, { repo.createVariant(it, nv, qty, code, shareCode, cleanNotes) }) { r ->
             when (r.code) {
-                Code.OK -> { saved = Saved(r.variantId!!, qty, labels); msg = null }
+                Code.OK -> { saved = Saved(r.variantId!!, qty); msg = null }
                 Code.DUPLICATE -> { duplicateOf = r.variantId; msg = failMsg(r.code) }
                 Code.LABEL_TAKEN -> { takenBy = r.variantId; msg = Msg(Tone.ERROR, "Label belongs to another item", "If the same barcode is printed on both items, save it as a shared label.") }
                 else -> msg = failMsg(r.code)
@@ -321,7 +319,7 @@ fun FormScreen(nav: NavHostController) {
             item("code") {
                 SectionCard(
                     title = if (vm.isEdit) "Barcodes *" else "Barcode *",
-                    subtitle = "Scan or type the code on the tag. No barcode on the tag? Generate one and print labels.",
+                    subtitle = "Scan or type the code on the tag. No barcode on the tag? Generate a new one.",
                 ) { if (vm.isEdit) EditCodesField(vm, nav) else CodeField(vm, nav) }
             }
             item("notes") {
@@ -349,8 +347,7 @@ fun FormScreen(nav: NavHostController) {
                     if (vm.errors.isNotEmpty()) FieldHint("Check the highlighted fields")
                     if (vm.isEdit) BigButton("Save changes", { vm.save() }, enabled = !vm.busy)
                     else {
-                        BigButton("Save product", { vm.update { withLabels = false }; vm.save() }, enabled = !vm.busy)
-                        SecondaryButton("Save & print labels", { vm.update { withLabels = true }; vm.save() }, Modifier.fillMaxWidth(), enabled = !vm.busy)
+                        BigButton("Save product", { vm.save() }, enabled = !vm.busy)
                     }
                 }
             }
@@ -381,8 +378,6 @@ private fun SavedPanel(vm: FormViewModel, nav: NavHostController, s: Saved) {
         return
     }
     MessageCard(Msg(Tone.SUCCESS, "Product added — ${pieces(s.qty)}")) {
-        if (s.labels && s.qty > 0) BigButton("Make ${s.qty} labels", { nav.go(Routes.labels(s.id, s.qty)) })
-        if (s.labels && s.qty == 0) Text("Opening quantity is 0, so no labels were made. Use Labels on the product later.", fontSize = 15.sp)
         BigButton("Add another size / sleeve", vm::another)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SecondaryButton("View product", { nav.go(Routes.variant(s.id)) { popUpTo(Routes.FORM) { inclusive = true } } }, Modifier.weight(1f))
@@ -495,7 +490,7 @@ private fun CodeField(vm: FormViewModel, nav: NavHostController) {
         Text("${code.raw.take(80)} (${Codes.formatLabel(code.format)})", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         vm.codeStatus?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 15.sp) }
         if (vm.shareCode) Text("Will be saved as a shared label", fontSize = 15.sp)
-        if (StoreBarcode.isStore(code.raw)) Text("New shop barcode. Use Save & print labels to print it.", fontSize = 15.sp)
+        if (StoreBarcode.isStore(code.raw)) Text("New shop barcode. After saving, print it from the product page (Labels).", fontSize = 15.sp)
         SecondaryButton("Remove barcode", { vm.changeCode(null) })
         return
     }

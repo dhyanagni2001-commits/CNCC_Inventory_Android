@@ -67,7 +67,7 @@ fun failMsg(code: Code): Msg = Msg(
     Tone.ERROR,
     when (code) {
         Code.NO_STOCK -> "No pieces available"
-        Code.ARCHIVED -> "This item is archived"
+        Code.ARCHIVED -> "This item was deleted"
         Code.NOT_FOUND -> "Product not found"
         Code.NO_SALE -> "No sale found for this item"
         Code.LIMIT -> "This sale is already returned"

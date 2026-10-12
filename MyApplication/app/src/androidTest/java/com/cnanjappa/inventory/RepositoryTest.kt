@@ -99,11 +99,33 @@ class RepositoryTest {
         assertEquals(0, qty(id))
     }
 
-    @Test fun archivedItemsCannotBeSoldOrRestocked() = runBlocking {
-        val id = create(2)
-        repo.setArchived(id, true)
+    @Test fun deletedItemIsGoneEverywhereButHistoryStays() = runBlocking {
+        val tag = ScannedCode("8901000000019", "EAN_13")
+        val id = create(3, code = tag)
+        val sale = repo.sell(newOpId(), id).refId!!
+        val label = dao.variant(id)!!.code!!
+        assertEquals(Code.OK, repo.deleteItem(newOpId(), id, 2).code)
+
+        // Pieces written off (tearDown checks the ledger still reconciles); can't be sold, stocked or returned.
+        assertEquals(0, qty(id))
         assertEquals(Code.ARCHIVED, repo.sell(newOpId(), id).code)
         assertEquals(Code.ARCHIVED, repo.restock(newOpId(), id, 1).code)
+        assertEquals(Code.ARCHIVED, repo.returnItem(newOpId(), id, sale, 1, false).code)
+        assertEquals(Code.ARCHIVED, repo.undoSale(newOpId(), sale).code)
+        // Not found by its barcode or its printed app label; the sale record is kept.
+        assertEquals(Resolution.Unknown, repo.resolve(tag))
+        assertEquals(Resolution.Unknown, repo.resolve(ScannedCode(label, "CODE_128")))
+        assertNotNull(dao.sale(sale))
+
+        // Barcode and identity are free again: the same item can be added with the same tag.
+        val again = create(5, code = tag)
+        assertEquals(again, (repo.resolve(tag) as Resolution.One).variant.id)
+    }
+
+    @Test fun deleteRefusedWhenStockMovedSinceConfirming() = runBlocking {
+        val id = create(3)
+        repo.sell(newOpId(), id)
+        assertEquals(Code.STALE, repo.deleteItem(newOpId(), id, 3).code)
         assertEquals(2, qty(id))
     }
 

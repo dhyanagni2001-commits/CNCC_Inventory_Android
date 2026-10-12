@@ -16,6 +16,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +70,7 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
     init {
         recover(KEY_SELL) { r -> msg = Msg(Tone.SUCCESS, "1 item reduced — ${piecesLeft(r.remaining!!)}"); lastSaleId = r.refId }
         recover(KEY_RESTOCK) { r -> msg = Msg(Tone.SUCCESS, "${pieces(r.qty!!)} added — ${piecesLeft(r.remaining!!)}") }
+        recover(KEY_DELETE) { deleted = true }
         recover(KEY_CORRECT) { r -> msg = Msg(Tone.SUCCESS, "Stock corrected — ${piecesLeft(r.remaining!!)}") }
     }
 
@@ -142,9 +147,19 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
         takenBy = null
     }
 
-    fun setArchived(archived: Boolean) = viewModelScope.launch {
-        repo.setArchived(id, archived)
-        msg = Msg(Tone.SUCCESS, if (archived) "Item archived" else "Item active again")
+    var deleted by mutableStateOf(false)
+        private set
+
+    /** [expectedQty] is the count shown in the confirmation, so a sale meanwhile isn't silently written off. */
+    fun delete(expectedQty: Int) {
+        clearResult()
+        op(KEY_DELETE, { repo.deleteItem(it, id, expectedQty) }) { r ->
+            when {
+                r.ok -> deleted = true
+                r.code == com.cnanjappa.inventory.data.Code.STALE -> msg = Msg(Tone.ERROR, "Stock changed", "Check the pieces left, then delete again.")
+                else -> msg = failMsg(r.code)
+            }
+        }
     }
 
     companion object {
@@ -152,6 +167,7 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
         const val KEY_UNDO = "undoOp"
         const val KEY_RESTOCK = "restockOp"
         const val KEY_CORRECT = "correctOp"
+        const val KEY_DELETE = "deleteOp"
     }
 }
 
@@ -168,8 +184,17 @@ fun VariantScreen(nav: NavHostController) {
     CapturedCodeEffect { vm.link(it, share = false) }
     // Results show at the top; actions like Link barcode sit further down the page.
     LaunchedEffect(vm.msg) { if (vm.msg != null) scroll.animateScrollTo(0) }
+    LaunchedEffect(vm.deleted) { if (vm.deleted) nav.popBackStack() }
     SubScreen("Product", { nav.back() }) { pad ->
         val variant = v ?: return@SubScreen
+        if (variant.archived) {
+            // Reached from an old record: a deleted item has nothing left to act on.
+            Column(Modifier.fillMaxSize().padding(pad).padding(16.dp), verticalArrangement = BodyArrangement) {
+                VariantHeader(variant)
+                MessageCard(Msg(Tone.INFO, "This item was deleted", "Its past sales stay in History and Excel."))
+            }
+            return@SubScreen
+        }
         Column(
             Modifier.fillMaxSize().padding(pad).verticalScroll(scroll).padding(16.dp),
             verticalArrangement = BodyArrangement,
@@ -198,20 +223,17 @@ fun VariantScreen(nav: NavHostController) {
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                BigButton("Sell 1", vm::sell, Modifier.weight(1f), icon = Icons.Default.RemoveShoppingCart, enabled = !vm.busy && !variant.archived && variant.qty > 0)
+                BigButton("Sell 1", vm::sell, Modifier.weight(1f), icon = Icons.Default.RemoveShoppingCart, enabled = !vm.busy && variant.qty > 0)
                 BigButton(
                     "Return 1", { nav.go(Routes.returnItem(vm.id)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Filled.AssignmentReturn,
                     container = MaterialTheme.colorScheme.primaryContainer, content = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
-            if (variant.qty == 0 && !variant.archived) FieldHint("No pieces available")
+            if (variant.qty == 0) FieldHint("No pieces available")
 
             SectionCard(title = "Add stock", subtitle = "New pieces of this exact item") {
-                if (variant.archived) Text("Archived items cannot receive new stock. Make it active first.", style = MaterialTheme.typography.bodyMedium)
-                else {
-                    QtyStepper(vm.restockQty, vm::setRestock, min = 1, label = "Pieces received")
-                    BigButton("Add stock", vm::restock, enabled = !vm.busy)
-                }
+                QtyStepper(vm.restockQty, vm::setRestock, min = 1, label = "Pieces received")
+                BigButton("Add stock", vm::restock, enabled = !vm.busy)
             }
 
             SectionCard(title = "Correct stock", subtitle = "Counting errors, losses, damaged pieces") { CorrectSection(vm, variant) }
@@ -242,9 +264,38 @@ fun VariantScreen(nav: NavHostController) {
                 }
                 SecondaryButton("Add another size / sleeve", { nav.go(Routes.form(copy = vm.id)) }, Modifier.fillMaxWidth())
                 SecondaryButton("Edit details", { nav.go(Routes.form(edit = vm.id)) }, Modifier.fillMaxWidth())
-                SecondaryButton(if (variant.archived) "Make active again" else "Archive item", { vm.setArchived(!variant.archived) }, Modifier.fillMaxWidth())
             }
+            DeleteItem(vm, variant)
         }
+    }
+}
+
+/** Red "Delete item" with a confirmation that says exactly what happens. */
+@Composable
+private fun DeleteItem(vm: VariantViewModel, v: Variant) {
+    var asking by rememberSaveable { mutableStateOf(false) }
+    androidx.compose.material3.OutlinedButton(
+        onClick = { asking = true }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+    ) { Text("Delete item", style = MaterialTheme.typography.labelLarge) }
+    if (asking) {
+        val qty = v.qty
+        AlertDialog(
+            onDismissRequest = { asking = false },
+            title = { Text("Delete this item?") },
+            text = {
+                Text(
+                    "${v.title}\n${v.detail}\n\n" +
+                        "• It disappears from Stock, search and scanning.\n" +
+                        "• Its barcodes are freed for other items.\n" +
+                        (if (qty > 0) "• Its ${pieces(qty)} are removed from stock.\n" else "") +
+                        "• Past sales stay in History and Excel.\n\nThis can't be undone.",
+                )
+            },
+            confirmButton = { TextButton({ asking = false; vm.delete(qty) }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton({ asking = false }) { Text("Cancel") } },
+        )
     }
 }
 
