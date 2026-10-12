@@ -122,6 +122,17 @@ class RepositoryTest {
         assertEquals(again, (repo.resolve(tag) as Resolution.One).variant.id)
     }
 
+    @Test fun deletingOneOfTwoItemsSharingALabelLeavesItToTheOther() = runBlocking {
+        val code = ScannedCode("SHARED-TAG", "CODE_128")
+        val a = create(1, code = code)
+        val b = create(1, size = "XL")
+        assertEquals(LinkResult.SHARED, repo.link(b, code, share = true).result)
+        assertEquals(Code.OK, repo.deleteItem(newOpId(), a, 1).code)
+        // No "choose the item" step any more: the label is simply B's.
+        assertEquals(b, (repo.resolve(code) as Resolution.One).variant.id)
+        assertEquals(false, dao.alias(code.key)!!.shared)
+    }
+
     @Test fun deleteRefusedWhenStockMovedSinceConfirming() = runBlocking {
         val id = create(3)
         repo.sell(newOpId(), id)

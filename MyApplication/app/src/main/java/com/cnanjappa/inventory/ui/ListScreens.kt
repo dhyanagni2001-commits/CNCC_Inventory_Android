@@ -112,7 +112,7 @@ fun ProductsScreen(nav: NavHostController) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (pickRaw != null) MessageCard(Msg(Tone.INFO, "Choose the item for this barcode", pickRaw.take(80)))
-                    SearchBox(vm, "Search name, brand, colour, size")
+                    SearchBox(vm, "Search company, product, colour, size")
                 }
             }
             items(items.itemCount, key = items.itemKey { it.id }) { i ->
@@ -173,7 +173,7 @@ fun StockScreen(nav: NavHostController) {
                 val returned = today.filter { it.type == MoveType.RETURN || it.type == MoveType.RETURN_DAMAGED }.sumOf { it.pieces }
                 val undone = today.firstOrNull { it.type == MoveType.REVERSAL }?.pieces ?: 0
                 Text("Today: $sold sold · $returned returned · $undone sales undone", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SearchBox(vm, "Search name, brand, colour, size")
+                SearchBox(vm, "Search company, product, colour, size")
             }
         }
         items(items.itemCount, key = items.itemKey { it.id }) { i ->

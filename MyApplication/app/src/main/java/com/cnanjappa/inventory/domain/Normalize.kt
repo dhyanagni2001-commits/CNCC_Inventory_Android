@@ -114,8 +114,8 @@ object Validate {
             }
             return c
         }
-        val name = text(input.name, Field.NAME, NAME_MAX, "Enter product name")
-        val model = text(input.model, Field.MODEL, NAME_MAX, "Enter model name")
+        val name = text(input.name, Field.NAME, NAME_MAX, "Enter company name")
+        val model = text(input.model, Field.MODEL, NAME_MAX, "Enter product name")
         val sizeText = text(input.size, Field.SIZE, SIZE_MAX, "Choose a size")
         val size = Sizes.canonical(sizeText)
         if (input.sleeve == null) errors += FieldError(Field.SLEEVE, "Choose Full or Half")

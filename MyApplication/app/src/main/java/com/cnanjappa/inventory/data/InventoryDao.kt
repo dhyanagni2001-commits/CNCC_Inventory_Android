@@ -89,14 +89,11 @@ interface InventoryDao {
     @Query("SELECT IFNULL(SUM(qty), 0) FROM variants")
     fun totalPieces(): Flow<Int>
 
-    @Query("SELECT company FROM variants WHERE company != '' AND company LIKE :q ESCAPE '\\' GROUP BY company COLLATE NOCASE ORDER BY MAX(id) DESC LIMIT :limit")
-    fun companies(q: String, limit: Int): Flow<List<String>>
-
-    @Query("SELECT name FROM variants WHERE name LIKE :q ESCAPE '\\' GROUP BY name COLLATE NOCASE ORDER BY MAX(id) DESC LIMIT :limit")
+    @Query("SELECT name FROM variants WHERE archived = 0 AND name LIKE :q ESCAPE '\\' GROUP BY name COLLATE NOCASE ORDER BY MAX(id) DESC LIMIT :limit")
     fun names(q: String, limit: Int): Flow<List<String>>
 
     @Query(
-        """SELECT model FROM variants WHERE (:name = '' OR name = :name COLLATE NOCASE) AND model LIKE :q ESCAPE '\'
+        """SELECT model FROM variants WHERE archived = 0 AND (:name = '' OR name = :name COLLATE NOCASE) AND model LIKE :q ESCAPE '\'
         GROUP BY model COLLATE NOCASE ORDER BY MAX(id) DESC LIMIT :limit""",
     )
     fun models(name: String, q: String, limit: Int): Flow<List<String>>
@@ -124,8 +121,15 @@ interface InventoryDao {
     @Query("DELETE FROM alias_candidates WHERE `key` = :key AND variantId = :variantId")
     suspend fun deleteCandidate(key: String, variantId: Long)
 
-    @Query("SELECT COUNT(*) FROM alias_candidates WHERE `key` = :key")
-    suspend fun candidateCount(key: String): Int
+    @Query("SELECT variantId FROM alias_candidates WHERE `key` = :key")
+    suspend fun candidateIds(key: String): List<Long>
+
+    /** A shared code left on a single item becomes that item's own code again. */
+    @Query("UPDATE aliases SET variantId = :variantId, shared = 0 WHERE `key` = :key")
+    suspend fun unshare(key: String, variantId: Long)
+
+    @Query("DELETE FROM alias_candidates WHERE `key` = :key")
+    suspend fun deleteCandidates(key: String)
 
     @Query("UPDATE aliases SET variantId = NULL, shared = 1 WHERE `key` = :key")
     suspend fun markShared(key: String)

@@ -287,6 +287,16 @@ class InventoryRepository(val db: AppDatabase) {
         }
     }
 
+    /** Takes [variantId] off a shared code; a code left on one item becomes its own, on none it is removed. */
+    private suspend fun dropFromShared(key: String, variantId: Long) {
+        dao.deleteCandidate(key, variantId)
+        val left = dao.candidateIds(key)
+        when (left.size) {
+            0 -> dao.deleteAlias(key)
+            1 -> { dao.unshare(key, left.single()); dao.deleteCandidates(key) }
+        }
+    }
+
     /**
      * Saves a whole Edit in one transaction, or nothing: details, barcodes removed ([removeKeys]) and
      * added ([add]), and the quantity. A quantity change is recorded as a correction in History and is
@@ -311,10 +321,7 @@ class InventoryRepository(val db: AppDatabase) {
         for (key in removeKeys) {
             val a = dao.alias(key) ?: continue
             if (!a.shared) { if (a.variantId == variantId) dao.deleteAlias(key) }
-            else {
-                dao.deleteCandidate(key, variantId)
-                if (dao.candidateCount(key) == 0) dao.deleteAlias(key)
-            }
+            else dropFromShared(key, variantId)
         }
         for (code in add) {
             val r = linkInTx(variantId, code, share = false)
@@ -343,10 +350,7 @@ class InventoryRepository(val db: AppDatabase) {
                 dao.insertMovement(Movement(opId = opId, variantId = variantId, type = MoveType.ADJUST, delta = -expectedQty, qty = expectedQty, ts = now(), note = "Deleted", description = v.description))
             } else if (v.qty != 0) throw Reject(Code.STALE, variantId)
             dao.deleteAliasesOf(variantId)
-            for (key in dao.candidateKeysOf(variantId)) {
-                dao.deleteCandidate(key, variantId)
-                if (dao.candidateCount(key) == 0) dao.deleteAlias(key)
-            }
+            for (key in dao.candidateKeysOf(variantId)) dropFromShared(key, variantId)
             dao.markDeleted(variantId)
             OpResult(Code.OK, variantId, 0, qty = -expectedQty)
         }

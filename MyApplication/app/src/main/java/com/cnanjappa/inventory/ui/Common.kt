@@ -382,9 +382,9 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 fun VariantHeader(v: Variant, showStock: Boolean = true) {
     SectionCard {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (v.company.isNotEmpty()) Text(v.company.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-            Text(listOf(v.name, v.model).filter { it.isNotEmpty() }.joinToString(" · "), style = MaterialTheme.typography.headlineSmall)
+            Text(v.title, style = MaterialTheme.typography.headlineSmall)
             Text(v.detail, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (v.company.isNotEmpty()) Text(v.company, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) // comments
             if (v.archived) Text("Deleted", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
         }
         if (showStock) Row(verticalAlignment = Alignment.Bottom) {

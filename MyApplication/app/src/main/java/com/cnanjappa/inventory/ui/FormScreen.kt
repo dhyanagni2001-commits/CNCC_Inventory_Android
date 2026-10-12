@@ -21,6 +21,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -104,11 +112,10 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     private var initial = snapshot()
     private var original: com.cnanjappa.inventory.data.Variant? = null
 
-    /** Most recently used saved choices; models follow the chosen product name. */
-    val companies = repo.dao.companies(InventoryRepository.likePattern(""), 12).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val names = repo.dao.names(InventoryRepository.likePattern(""), 12).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    /** Saved companies and (for the chosen company) products, newest first, for the pick-or-add dropdowns. */
+    val names = repo.dao.names(InventoryRepository.likePattern(""), SUGGESTIONS).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     @OptIn(kotlinx.coroutines.FlowPreview::class)
-    val models = snapshotFlow { name.trim() }.debounce(150).flatMapLatest { repo.dao.models(it, InventoryRepository.likePattern(""), 12) }
+    val models = snapshotFlow { name.trim() }.debounce(150).flatMapLatest { repo.dao.models(it, InventoryRepository.likePattern(""), SUGGESTIONS) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val colours = repo.dao.colours(100).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val extraSizes = repo.dao.extraSizes(
@@ -192,12 +199,18 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         c?.let { checkCode(it) }
     }
 
+    /** Back on the form after other screens: the barcode may have been freed (item deleted) or taken. */
+    fun recheckCode() { code?.let(::checkCode) }
+
     private fun checkCode(c: ScannedCode) = viewModelScope.launch {
-        codeStatus = when (val r = repo.resolve(c)) {
+        val r = repo.resolve(c)
+        codeStatus = when (r) {
             is Resolution.One -> "Already linked to: ${r.variant.description}"
             is Resolution.Many -> "Shared label already used on ${r.variants.size} items"
             Resolution.Unknown -> null
         }
+        // The item that had this label was deleted meanwhile: drop the old "belongs to another item".
+        if (r == Resolution.Unknown && takenBy != null) { takenBy = null; msg = null }
     }
 
     fun error(f: Field) = errors.firstOrNull { it.field == f }?.message
@@ -262,6 +275,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     companion object {
         const val KEY = "createOp"
         const val KEY_EDIT = "editOp"
+        const val SUGGESTIONS = 200
     }
 }
 
@@ -270,6 +284,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
 fun FormScreen(nav: NavHostController) {
     val vm = appViewModel { c, h -> FormViewModel(c, h) }
     CapturedCodeEffect(vm::onCode)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.recheckCode() }
     var confirmLeave by remember { mutableStateOf(false) }
     BackHandler(enabled = vm.dirty) { confirmLeave = true }
     val back = { if (vm.dirty) confirmLeave = true else nav.back() }
@@ -284,17 +299,20 @@ fun FormScreen(nav: NavHostController) {
         val saved = vm.saved
         val names by vm.names.collectAsStateWithLifecycle()
         val models by vm.models.collectAsStateWithLifecycle()
-        val companies by vm.companies.collectAsStateWithLifecycle()
         LazyColumn(
             Modifier.fillMaxSize().padding(pad).imePadding(), state = list,
             contentPadding = PaddingValues(16.dp), verticalArrangement = BodyArrangement,
         ) {
             if (saved != null) { item("saved") { SavedPanel(vm, nav, saved) }; return@LazyColumn }
             item("item") {
-                SectionCard(title = "Item", subtitle = "Tap a saved choice, or Add new") {
-                    PickField("Product name *", vm.name, names, NAME_MAX, vm.error(Field.NAME), "e.g. White Shirt") { vm.update { name = it } }
-                    PickField("Model / sub-name *", vm.model, models, NAME_MAX, vm.error(Field.MODEL), "Use General if there is no model") { vm.update { model = it } }
-                    PickField("Company / brand (optional)", vm.company, companies, NAME_MAX, vm.error(Field.COMPANY), "e.g. Ramraj") { vm.update { company = it } }
+                SectionCard(title = "Item") {
+                    ComboField("Company name *", vm.name, names, NAME_MAX, vm.error(Field.NAME), "e.g. Ramraj", "+ Add new company") { vm.update { name = it } }
+                    ComboField("Product name *", vm.model, models, NAME_MAX, vm.error(Field.MODEL), "e.g. RR Image", "+ Add new product") { vm.update { model = it } }
+                    OutlinedTextField(
+                        value = vm.company, onValueChange = { vm.update { company = it.take(NAME_MAX) } }, modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Comments (optional)") }, singleLine = true, isError = vm.error(Field.COMPANY) != null,
+                    )
+                    FieldHint(vm.error(Field.COMPANY))
                 }
             }
             item("size") { SectionCard(title = "Size *") { SizeField(vm) } }
@@ -392,25 +410,36 @@ private val SECTION_OF = mapOf(
     Field.COLOUR to 3, Field.QTY to 4, Field.CODE to 5, Field.NOTES to 6,
 )
 
-/** Tap a saved value, or "Add new" to type one. Typing is only needed the first time. */
+/**
+ * Pick a saved value or add a new one. The dropdown lists "+ Add new …" first, then saved values
+ * matching what is typed, so the form stays the same size however many products the shop has.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PickField(label: String, value: String, options: List<String>, max: Int, error: String?, placeholder: String, onValue: (String) -> Unit) {
-    var typing by rememberSaveable { mutableStateOf(false) }
-    Text(label, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    val shown = options.filterNot { it.equals(value.trim(), ignoreCase = true) }
-    val selectedKnown = value.isNotBlank() && options.any { it.equals(value.trim(), ignoreCase = true) }
-    // A new (not yet saved) value keeps the text box open while it is typed.
-    val showField = typing || options.isEmpty() || (value.isNotBlank() && !selectedKnown)
-    if (options.isNotEmpty()) ChoiceRow {
-        if (selectedKnown) ChoiceButton(value.trim(), true, { onValue("") })
-        shown.forEach { o -> ChoiceButton(o, false, { onValue(o); typing = false }) }
-        ChoiceButton("+ Add new", showField, { typing = true; if (selectedKnown) onValue("") })
-    }
-    if (showField) {
+private fun ComboField(label: String, value: String, options: List<String>, max: Int, error: String?, placeholder: String, addNew: String, onValue: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+    val typed = value.trim()
+    val known = options.any { it.equals(typed, ignoreCase = true) }
+    // A picked value shows the whole list again; while typing, only matches.
+    val shown = if (typed.isEmpty() || known) options else options.filter { it.contains(typed, ignoreCase = true) }
+    ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it }) {
         OutlinedTextField(
-            value = value, onValueChange = { onValue(it.take(max)) }, modifier = Modifier.fillMaxWidth(),
-            singleLine = true, placeholder = { Text(placeholder) }, isError = error != null,
+            value = value, onValueChange = { onValue(it.take(max)); open = true },
+            modifier = Modifier.fillMaxWidth().focusRequester(focus).menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
+            label = { Text(label) }, placeholder = { Text(placeholder) }, singleLine = true, isError = error != null,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
         )
+        ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(if (typed.isEmpty() || known) addNew else "+ Add \"$typed\"", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) },
+                onClick = {
+                    open = false
+                    if (typed.isEmpty() || known) { onValue(""); focus.requestFocus() } // start typing a new one
+                },
+            )
+            shown.forEach { o -> DropdownMenuItem(text = { Text(o) }, onClick = { onValue(o); open = false }) }
+        }
     }
     FieldHint(error)
 }

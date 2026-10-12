@@ -35,7 +35,8 @@ data class Variant(
     /** Free-text notes from the shop (fabric, supplier, rack...). Not part of the identity. */
     @ColumnInfo(defaultValue = "") val notes: String = "",
 ) {
-    val title get() = listOf(company, name, model).filter { it.isNotEmpty() }.joinToString(" · ")
+    /** Company · product. Columns: name = company name, model = product name, company = optional comments. */
+    val title get() = listOf(name, model).filter { it.isNotEmpty() }.joinToString(" · ")
     val detail get() = listOf(colour, "Size $sizeLabel", sleeve).filter { it.isNotEmpty() }.joinToString(" · ")
     val description get() = "$title — $detail"
 }

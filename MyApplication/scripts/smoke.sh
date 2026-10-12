@@ -42,7 +42,7 @@ check "Menu shows app version" 'has "Version "'
 $ADB shell input keyevent KEYCODE_BACK; sleep 1
 
 tap "Stock"; sleep 2
-check "Stock tab opens (database read, Excel on top)" 'has "Search name" && has "Excel report"'
+check "Stock tab opens (database read, Excel on top)" 'has "Search company" && has "Excel report"'
 tap "Home"; sleep 2
 
 tap "Sell"; sleep 8

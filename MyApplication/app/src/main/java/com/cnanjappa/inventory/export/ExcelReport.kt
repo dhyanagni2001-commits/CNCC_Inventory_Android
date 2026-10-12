@@ -41,9 +41,9 @@ class ExcelReport(private val db: AppDatabase) {
                             summary(x, asOf, zone); sheetCount++
                             onProgress("Inventory")
                             x.sheet("Inventory", listOf(16, 22, 18, 12, 10, 8, 10, 10, 16, 10, 30)) {
-                                header("Company", "Product", "Model", "Colour", "Size", "Sleeve", "Pieces", "Status", "Variant code", "Barcodes", "Notes")
+                                header("Company", "Product", "Comments", "Colour", "Size", "Sleeve", "Pieces", "Status", "Variant code", "Barcodes", "Notes")
                                 each(
-                                    """SELECT company, name, model, colour, sizeLabel, sleeve, qty, archived, code,
+                                    """SELECT name, model, company, colour, sizeLabel, sleeve, qty, archived, code,
                                     (SELECT COUNT(*) FROM aliases a WHERE a.variantId = v.id) + (SELECT COUNT(*) FROM alias_candidates c WHERE c.variantId = v.id),
                                     notes FROM variants v ORDER BY name COLLATE NOCASE, company COLLATE NOCASE, model COLLATE NOCASE, colour COLLATE NOCASE, sizeSort, sizeLabel, sleeve""",
                                 ) { s ->
@@ -53,9 +53,9 @@ class ExcelReport(private val db: AppDatabase) {
                             }; sheetCount++
                             onProgress("Product totals")
                             x.sheet("Product totals", listOf(16, 22, 18, 12, 10, 10, 10, 30)) {
-                                header("Company", "Product", "Model", "Colour", "Full pieces", "Half pieces", "Total pieces", "Sizes")
+                                header("Company", "Product", "Comments", "Colour", "Full pieces", "Half pieces", "Total pieces", "Sizes")
                                 each(
-                                    """SELECT MIN(company), MIN(name), MIN(model), MIN(colour),
+                                    """SELECT MIN(name), MIN(model), MIN(company), MIN(colour),
                                     SUM(CASE WHEN sleeve = 'Full' THEN qty ELSE 0 END), SUM(CASE WHEN sleeve = 'Half' THEN qty ELSE 0 END), SUM(qty),
                                     (SELECT GROUP_CONCAT(l, ', ') FROM (SELECT DISTINCT sizeLabel AS l FROM variants z WHERE z.groupKey = v.groupKey ORDER BY sizeSort))
                                     FROM variants v GROUP BY groupKey ORDER BY MIN(name) COLLATE NOCASE, MIN(company) COLLATE NOCASE, MIN(model) COLLATE NOCASE""",
@@ -63,9 +63,9 @@ class ExcelReport(private val db: AppDatabase) {
                             }; sheetCount++
                             onProgress("Size breakdown")
                             x.sheet("Size breakdown", listOf(16, 22, 18, 12, 10, 10, 10, 10)) {
-                                header("Company", "Product", "Model", "Colour", "Size", "Full pieces", "Half pieces", "Total pieces")
+                                header("Company", "Product", "Comments", "Colour", "Size", "Full pieces", "Half pieces", "Total pieces")
                                 each(
-                                    """SELECT MIN(company), MIN(name), MIN(model), MIN(colour), MIN(sizeLabel),
+                                    """SELECT MIN(name), MIN(model), MIN(company), MIN(colour), MIN(sizeLabel),
                                     SUM(CASE WHEN sleeve = 'Full' THEN qty ELSE 0 END), SUM(CASE WHEN sleeve = 'Half' THEN qty ELSE 0 END), SUM(qty)
                                     FROM variants GROUP BY groupKey, sizeKey
                                     ORDER BY MIN(name) COLLATE NOCASE, MIN(company) COLLATE NOCASE, MIN(model) COLLATE NOCASE, groupKey, MIN(sizeSort)""",
@@ -74,12 +74,12 @@ class ExcelReport(private val db: AppDatabase) {
                             sheetCount += movements(x, onProgress, ::tick)
                             onProgress("Barcodes")
                             x.sheet("Barcodes", listOf(22, 12, 14, 16, 22, 18, 10, 8, 16)) {
-                                header("Barcode text", "Format", "Link", "Company", "Product", "Model", "Size", "Sleeve", "Variant code")
+                                header("Barcode text", "Format", "Link", "Company", "Product", "Comments", "Size", "Sleeve", "Variant code")
                                 each(
-                                    """SELECT a.raw, a.format, 'Direct', v.company, v.name, v.model, v.sizeLabel, v.sleeve, v.code
+                                    """SELECT a.raw, a.format, 'Direct', v.name, v.model, v.company, v.sizeLabel, v.sleeve, v.code
                                     FROM aliases a JOIN variants v ON v.id = a.variantId
                                     UNION ALL
-                                    SELECT a.raw, a.format, 'Shared — choose item', v.company, v.name, v.model, v.sizeLabel, v.sleeve, v.code
+                                    SELECT a.raw, a.format, 'Shared — choose item', v.name, v.model, v.company, v.sizeLabel, v.sleeve, v.code
                                     FROM aliases a JOIN alias_candidates c ON c.`key` = a.`key` JOIN variants v ON v.id = c.variantId
                                     ORDER BY 1, 3""",
                                 ) { s -> tick(); row(s.t(0), Codes.formatLabel(s.t(1)), s.t(2), s.t(3), s.t(4), s.t(5), s.t(6), s.t(7), s.t(8)) }

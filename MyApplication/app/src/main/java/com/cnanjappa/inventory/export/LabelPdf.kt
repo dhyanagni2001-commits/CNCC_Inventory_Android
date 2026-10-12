@@ -122,8 +122,8 @@ object LabelPdf {
         val title = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textSize = (h * 0.11f).coerceAtMost(9f); typeface = Typeface.DEFAULT_BOLD }
         val body = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textSize = (h * 0.10f).coerceAtMost(8f) }
         val lines = listOf(
-            title to listOf(v.company, v.name).filter { it.isNotEmpty() }.joinToString(" · "),
-            body to v.model,
+            title to v.name, // company
+            body to v.model, // product
             title to listOf(v.colour, "Size ${v.sizeLabel}", v.sleeve).filter { it.isNotEmpty() }.joinToString(" · "),
         )
         when (p.type) {
