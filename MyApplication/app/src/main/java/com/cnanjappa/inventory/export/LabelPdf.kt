@@ -9,9 +9,11 @@ import android.graphics.pdf.PdfDocument
 import android.text.TextUtils
 import android.text.TextPaint
 import com.cnanjappa.inventory.data.Variant
+import com.cnanjappa.inventory.domain.Codes
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.oned.Code128Writer
+import com.google.zxing.oned.EAN13Writer
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.Dispatchers
@@ -47,12 +49,13 @@ data class LabelJob(val variant: Variant, val copies: Int)
  */
 object LabelPdf {
     private const val PT_PER_MM = 72f / 25.4f
-    private const val QUIET_MODULES = 10
+    private const val QUIET_MODULES = 11 // EAN-13 needs 11 modules; Code 128 needs 10
 
     private class Pattern(val type: LabelType, val bars: BooleanArray?, val qr: com.google.zxing.common.BitMatrix?)
 
     private fun encode(code: String, type: LabelType): Pattern = when (type) {
-        LabelType.CODE128 -> Pattern(type, Code128Writer().encode(code), null)
+        // Generated shop barcodes print as EAN-13 so any retail scanner reads them; other codes as Code 128.
+        LabelType.CODE128 -> Pattern(type, if (Codes.isEan13(code)) EAN13Writer().encode(code) else Code128Writer().encode(code), null)
         LabelType.QR -> Pattern(
             type, null,
             QRCodeWriter().encode(code, BarcodeFormat.QR_CODE, 0, 0, mapOf(EncodeHintType.MARGIN to 0, EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)),

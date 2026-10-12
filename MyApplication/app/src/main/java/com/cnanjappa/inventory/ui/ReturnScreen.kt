@@ -63,7 +63,7 @@ fun ReturnScreen(nav: NavHostController) {
     var damaged by rememberSaveable { mutableStateOf(false) }
     var qty by rememberSaveable { mutableStateOf(1) }
     var saleId by rememberSaveable { mutableStateOf<Long?>(null) }
-    SubScreen("Returning item", { nav.popBackStack() }) { pad ->
+    SubScreen("Returning item", { nav.back() }) { pad ->
         val variant = v ?: return@SubScreen
         val eligible = sales ?: return@SubScreen
         val chosen = eligible.firstOrNull { it.id == saleId }
@@ -74,16 +74,16 @@ fun ReturnScreen(nav: NavHostController) {
                 MessageCard(m) {
                     if (vm.done) {
                         BigButton("Return another", { vm.again(); qty = 1; damaged = false; saleId = null })
-                        SecondaryButton("Done", { nav.popBackStack() })
+                        SecondaryButton("Done", { nav.back() })
                     }
                     if (m.text == failMsg(Code.LIMIT).text) SecondaryButton("Choose another sale", { more = true; saleId = null; vm.msg = null })
-                    if (vm.noSale) SecondaryButton("Correct stock", { nav.navigate(Routes.variant(vm.id)) })
+                    if (vm.noSale) SecondaryButton("Correct stock", { nav.go(Routes.variant(vm.id)) })
                 }
             }
             if (vm.done) return@Column
             if (eligible.isEmpty()) {
                 MessageCard(Msg(Tone.ERROR, "No sale found for this item", "A return must match a recorded sale. If the count is wrong, correct the stock instead.")) {
-                    SecondaryButton("Correct stock", { nav.navigate(Routes.variant(vm.id)) })
+                    SecondaryButton("Correct stock", { nav.go(Routes.variant(vm.id)) })
                 }
                 return@Column
             }

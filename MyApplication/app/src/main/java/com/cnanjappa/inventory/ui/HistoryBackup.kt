@@ -78,7 +78,7 @@ fun HistoryScreen(nav: NavHostController) {
     val vm = appViewModel { c, h -> HistoryViewModel(c, h) }
     val rows = vm.rows.collectAsLazyPagingItems()
     val fmt = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-    SubScreen("History", { nav.popBackStack() }) { pad ->
+    SubScreen("History", { nav.back() }) { pad ->
         LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             vm.msg?.let { m -> item { MessageCard(m) } }
             items(rows.itemCount, key = rows.itemKey { it.id }) { i ->
@@ -179,7 +179,7 @@ fun BackupScreen(nav: NavHostController) {
     val fmt = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
     val create = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { vm.backup(it) }
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { vm.pick(it) }
-    SubScreen("Backup", { nav.popBackStack() }) { pad ->
+    SubScreen("Backup", { nav.back() }) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = BodyArrangement) {
             Text("The app backs up automatically every night around ${AutoBackup.HOUR - 12} PM, if anything changed, to ${AutoBackup.locationText()}. The last 14 are kept.", fontSize = 17.sp)
             Text("Copy a backup to a computer or another phone now and then. Losing this phone loses the backups on it.", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -42,7 +42,6 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -71,6 +70,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.lifecycle.Lifecycle
+import androidx.navigation.NavOptionsBuilder
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -81,6 +82,19 @@ import com.cnanjappa.inventory.LaunchState
 import com.cnanjappa.inventory.container
 import com.cnanjappa.inventory.domain.SHOP_NAME
 import kotlinx.coroutines.delay
+
+/**
+ * Navigation for taps: only from a screen that has finished opening (RESUMED). A double tap, or a
+ * tap during the slide-in, is ignored, so one Back always returns to where the user was.
+ */
+fun NavHostController.go(route: String, builder: NavOptionsBuilder.() -> Unit = {}) {
+    if (currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) navigate(route, builder)
+}
+
+/** Back for ← and Done buttons, with the same guard: a double tap never skips two screens. */
+fun NavHostController.back() {
+    if (currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) popBackStack()
+}
 
 object Routes {
     const val HOME = "home"
@@ -108,7 +122,7 @@ object Routes {
     }.trimEnd('&', '?')
     fun labels(id: Long, count: Int) = "labels/$id?count=$count"
 
-    val TABS = listOf("home", "products", "stock")
+    val TABS = listOf("home", "stock")
 }
 
 /**
@@ -213,7 +227,7 @@ fun MainNav() {
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route?.substringBefore('?')
-    val onTab = route in Routes.TABS && entry?.arguments?.getString("pickRaw") == null
+    val onTab = route in Routes.TABS
     var menu by remember { mutableStateOf(false) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -236,7 +250,7 @@ fun MainNav() {
         },
         bottomBar = {
             if (onTab) NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, modifier = Modifier.drawTopHairline()) {
-                listOf(Triple("home", "Home", Icons.Default.Home), Triple("products", "Products", Icons.AutoMirrored.Filled.ViewList), Triple("stock", "Stock", Icons.Default.Inventory2))
+                listOf(Triple("home", "Home", Icons.Default.Home), Triple("stock", "Stock", Icons.Default.Inventory2))
                     .forEach { (r, label, icon) ->
                         NavigationBarItem(
                             selected = route == r,

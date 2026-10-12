@@ -40,6 +40,23 @@ class CodesTest {
         assertEquals(listOf("T:RMJ-1"), Codes.lookupKeys("RMJ-1", "CODE_128"))
     }
 
+    @Test fun ean13CheckDigit() {
+        assertEquals('9', Codes.eanCheck("890100000001"))
+        assertEquals(true, Codes.isEan13("8901000000019"))
+        assertEquals(false, Codes.isEan13("8901000000018"))
+        assertEquals(false, Codes.isEan13("890100000001"))
+    }
+
+    @Test fun storeBarcodesAreValidInStoreEans() {
+        val c = StoreBarcode.make(42, 1)
+        assertEquals("2042000000015", c)
+        assertEquals(true, Codes.isEan13(c) && StoreBarcode.isStore(c))
+        assertEquals(1L, StoreBarcode.serialOf(c, 42))
+        assertNull(StoreBarcode.serialOf(c, 43))
+        assertEquals(StoreBarcode.MAX_SERIAL, StoreBarcode.serialOf(StoreBarcode.make(999, StoreBarcode.MAX_SERIAL), 999))
+        assertEquals(false, StoreBarcode.isStore("8901000000019")) // manufacturer codes never start with 2
+    }
+
     @Test fun typedCodesClassifiedByLength() {
         assertEquals(Codes.key("0890123456789", "EAN_13"), Codes.key("0890123456789", Codes.TYPED))
         assertEquals(Codes.key("890123456789", "UPC_A"), Codes.key("890123456789", Codes.TYPED))

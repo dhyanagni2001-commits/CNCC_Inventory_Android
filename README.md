@@ -55,7 +55,10 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 ./gradlew :app:assemblePreview    # optimised test build
 adb install -r app/build/outputs/apk/preview/app-preview.apk
+adb shell cmd package compile -m speed-profile -f com.cnanjappa.inventory   # optimise now (see below)
 ```
+
+An APK installed over USB, or from a file, runs unoptimised until Android compiles it in the background (when the phone is idle and charging, usually overnight). Until then screens open noticeably slower. The `compile` line does it straight away; run it after every install.
 
 The release APK (`./gradlew :app:assembleRelease`) must be signed with the shop's own key. This repository contains no keys.
 

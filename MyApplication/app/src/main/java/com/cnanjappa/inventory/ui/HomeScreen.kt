@@ -15,14 +15,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material3.Surface
-import androidx.compose.material3.TextButton
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import java.time.LocalDate
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,9 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import com.cnanjappa.inventory.Container
@@ -55,8 +48,6 @@ import com.cnanjappa.inventory.export.ExcelReport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -71,9 +62,7 @@ sealed interface ExcelState {
     data class Failed(val text: String) : ExcelState
 }
 
-class HomeViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, handle) {
-    val total = repo.dao.totalPieces().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
+class ExcelViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, handle) {
     var excel by mutableStateOf<ExcelState>(ExcelState.Idle)
         private set
     private var job: Job? = null
@@ -123,39 +112,41 @@ class HomeViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
 
 const val XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+/** Home: only the three daily actions. Stock, Excel and history live elsewhere. */
 @Composable
 fun HomeScreen(nav: NavHostController) {
-    val vm = appViewModel { c, h -> HomeViewModel(c, h) }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        HeroTile(
+            "Sell", "Scan a label to sell 1 piece", Icons.Default.QrCodeScanner,
+        ) { nav.go(Routes.scan(ScanMode.SELL)) }
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.height(IntrinsicSize.Max)) {
+            ActionTile("Return", "Put a sold item back", Icons.AutoMirrored.Filled.AssignmentReturn, Modifier.weight(1f).fillMaxHeight()) {
+                nav.go(Routes.scan(ScanMode.RETURN))
+            }
+            ActionTile("Add Product", "New item or delivery", Icons.Default.AddBox, Modifier.weight(1f).fillMaxHeight()) {
+                nav.go(Routes.form())
+            }
+        }
+    }
+}
+
+/** "Excel report" button plus its progress / saved / failed card; shown at the top of the Stock tab. */
+@Composable
+fun ExcelPanel() {
+    val vm = appViewModel { c, h -> ExcelViewModel(c, h) }
     val context = LocalContext.current
-    val total by vm.total.collectAsStateWithLifecycle()
     val saveExcel = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(XLSX_MIME)) { vm.saveExcel(context, it) }
     val excel = vm.excel
     LaunchedEffect(excel) {
         if (excel is ExcelState.Ready && !vm.pickerOpened) { vm.pickerOpened = true; saveExcel.launch(excel.name) }
     }
-
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text(
-            LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, d MMMM")),
-            style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        HeroTile(
-            "Sell", "Scan a label to sell 1 piece", Icons.Default.QrCodeScanner,
-        ) { nav.navigate(Routes.scan(ScanMode.SELL)) }
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.height(IntrinsicSize.Max)) {
-            ActionTile("Return", "Put a sold item back", Icons.AutoMirrored.Filled.AssignmentReturn, Modifier.weight(1f).fillMaxHeight()) {
-                nav.navigate(Routes.scan(ScanMode.RETURN))
-            }
-            ActionTile("Add Product", "New item or delivery", Icons.Default.AddBox, Modifier.weight(1f).fillMaxHeight()) {
-                nav.navigate(Routes.form())
-            }
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         ActionTile(
-            "Stock overview", "Save the full stock report as Excel", Icons.Default.TableChart, Modifier.fillMaxWidth(),
-            enabled = excel !is ExcelState.Preparing,
+            "Excel report", "Save the full stock report as Excel", Icons.Default.TableChart, Modifier.fillMaxWidth(),
+            enabled = excel !is ExcelState.Preparing, minHeight = 0,
         ) { vm.startExcel(context) }
         AnimatedVisibility(excel !is ExcelState.Idle) {
             when (excel) {
@@ -175,19 +166,6 @@ fun HomeScreen(nav: NavHostController) {
             }
         }
         vm.msg?.let { MessageCard(it) { SecondaryButton("OK", { vm.msg = null }) } }
-        total?.let { n ->
-            SectionCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconBadge(Icons.Default.Inventory2, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, 44)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Pieces in stock", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("$n", style = MaterialTheme.typography.headlineMedium)
-                    }
-                    TextButton(onClick = { nav.navigate("stock") { launchSingleTop = true } }) { Text("View stock") }
-                }
-            }
-        }
     }
 }
 
@@ -208,10 +186,10 @@ private fun HeroTile(title: String, subtitle: String, icon: ImageVector, onClick
 }
 
 @Composable
-private fun ActionTile(title: String, subtitle: String, icon: ImageVector, modifier: Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+private fun ActionTile(title: String, subtitle: String, icon: ImageVector, modifier: Modifier, enabled: Boolean = true, minHeight: Int = 120, onClick: () -> Unit) {
     Surface(
         onClick = onClick, enabled = enabled, shape = CardShape, color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = modifier.heightIn(min = 120.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = modifier.heightIn(min = minHeight.dp),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             IconBadge(icon, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, 44)

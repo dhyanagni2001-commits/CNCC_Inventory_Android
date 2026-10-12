@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.cnanjappa.inventory.data.AppDatabase
@@ -16,6 +15,7 @@ import com.cnanjappa.inventory.data.newOpId
 import com.cnanjappa.inventory.domain.Codes
 import com.cnanjappa.inventory.domain.ScannedCode
 import com.cnanjappa.inventory.domain.Sleeve
+import com.cnanjappa.inventory.domain.StoreBarcode
 import com.cnanjappa.inventory.domain.Validate
 import com.cnanjappa.inventory.domain.VariantInput
 import com.cnanjappa.inventory.scan.BarcodeAnalyzer
@@ -64,6 +64,7 @@ class ScanSellE2ETest {
         Label("KURTA42", BarcodeFormat.CODE_39, "Kurta Code39"),
         Label("CNABCDE-1F", BarcodeFormat.QR_CODE, "QR text"),
         Label("SAREE-SILK-0099", BarcodeFormat.DATA_MATRIX, "Saree DataMatrix"),
+        Label(StoreBarcode.make(123, 1), BarcodeFormat.EAN_13, "Generated shop barcode"),
     )
 
     /** A label drawn as a camera would see it: centred, optionally tilted, slightly blurred by scaling. */
@@ -96,31 +97,19 @@ class ScanSellE2ETest {
         for (l in labels) for ((tilt, scale) in listOf(0f to 1f, 3f to 0.6f, 45f to 1f)) {
             val seen = decode(frame(l, tilt, scale))
             val tag = "${l.name} [${l.raw}] tilt=$tilt scale=$scale"
-            if (seen.isEmpty()) {
-                val bmp = frame(l, tilt, scale)
-                val all = Tasks.await(scanner.process(InputImage.fromBitmap(bmp, 0)))
-                problems += "$tag: NOT DECODED (ML Kit saw ${all.map { "${it.format}:${it.rawValue}@${it.boundingBox}" }})"
-                continue
-            }
+            if (seen.isEmpty()) { problems += "$tag: NOT DECODED"; continue }
             val got = seen.first()
-            Log.i("SCAN_E2E", "$tag -> raw=${got.raw} fmt=${got.format} key=${got.key}")
 
-            // 1) Product added by scanning its tag, then sold by scanning again.
-            val printedFmt = l.fmt.name
-            val id1 = addProduct(++n, l.name, ScannedCode(l.raw, printedFmt))
-            check(repo, got, id1, "$tag (added by scan)", problems)
-
-            // 2) Product added by typing the number printed on the tag.
-            db.close(); setUp()
-            val id2 = addProduct(++n, l.name, ScannedCode(l.raw, Codes.TYPED))
-            check(repo, got, id2, "$tag (added by typing)", problems)
-            db.close(); setUp()
+            // Product added by scanning its tag, and (in a fresh shop) by typing the printed number.
+            for ((how, format) in listOf("scan" to l.fmt.name, "typing" to Codes.TYPED)) {
+                db.close(); setUp()
+                check(got, addProduct(++n, l.name, ScannedCode(l.raw, format)), "$tag (added by $how)", problems)
+            }
         }
-        problems.forEach { Log.e("SCAN_E2E", it) }
         assertTrue("Scan-to-sell failures:\n" + problems.joinToString("\n"), problems.isEmpty())
     }
 
-    private suspend fun check(repo: InventoryRepository, got: ScannedCode, id: Long, tag: String, problems: MutableList<String>) {
+    private suspend fun check(got: ScannedCode, id: Long, tag: String, problems: MutableList<String>) {
         when (val r = repo.resolve(got)) {
             is Resolution.One -> {
                 if (r.variant.id != id) { problems += "$tag: matched wrong product"; return }

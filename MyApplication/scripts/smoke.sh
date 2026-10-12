@@ -26,6 +26,8 @@ tap() {  # tap the centre of the first element whose text (or, with ATTR=content
 if [ -z "${APK:-}" ]; then ./gradlew -q :app:assemblePreview; APK=app/build/outputs/apk/preview/app-preview.apk; fi
 log "# Smoke test $(date)  device: $($ADB shell getprop ro.product.model | tr -d '\r') Android $($ADB shell getprop ro.build.version.release | tr -d '\r')  apk: $APK"
 $ADB install -r "$APK" >/dev/null
+# A sideloaded APK runs unoptimised until Android compiles it overnight; test what the shop gets after that.
+$ADB shell cmd package compile -m speed-profile -f $PKG >/dev/null
 $ADB shell pm grant $PKG android.permission.CAMERA 2>/dev/null || true
 $ADB shell input keyevent KEYCODE_WAKEUP
 $ADB shell am force-stop $PKG
@@ -34,15 +36,13 @@ $ADB shell am start -n $PKG/.MainActivity >/dev/null
 sleep 5
 log "Version: $($ADB shell dumpsys package $PKG | grep -m1 versionName | tr -d ' \r')"
 
-check "Launch: home screen shown" 'has "Pieces in stock"'
+check "Launch: home screen shown" 'has "Scan a label to sell"'
 ATTR=content-desc tap "Menu"; sleep 1
 check "Menu shows app version" 'has "Version "'
 $ADB shell input keyevent KEYCODE_BACK; sleep 1
 
-tap "Products"; sleep 2
-check "Products tab opens (database read)" 'has "Search name"'
 tap "Stock"; sleep 2
-check "Stock tab opens (size totals)" 'has "Stock overview"'
+check "Stock tab opens (database read, Excel on top)" 'has "Search name" && has "Excel report"'
 tap "Home"; sleep 2
 
 tap "Sell"; sleep 8
@@ -55,7 +55,8 @@ else
 fi
 $ADB shell input keyevent KEYCODE_BACK; sleep 2
 
-tap "Stock overview"; sleep 8
+tap "Stock"; sleep 2
+tap "Excel report"; sleep 8
 check "Excel report builds (save dialog opens)" '$ADB shell dumpsys window | grep -m1 mCurrentFocus | grep -qi documentsui || has "Excel saved"'
 $ADB shell input keyevent KEYCODE_BACK; sleep 2   # cancel the save dialog
 check "Cancelling the save leaves the app usable" 'has "Excel not saved" && has "Save the full stock report"'

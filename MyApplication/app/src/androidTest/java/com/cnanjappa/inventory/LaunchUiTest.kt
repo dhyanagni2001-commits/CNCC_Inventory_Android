@@ -5,7 +5,9 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.hasText
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -32,7 +34,9 @@ class LaunchUiTest {
     @Test fun addProductHasOptionalNotes() {
         rule.waitUntil(LAUNCH_BUDGET_MS) { rule.onAllNodes(hasText("Add Product")).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Add Product").performClick()
-        rule.onNodeWithTag("notes").performScrollTo().assertIsDisplayed()
+        // The form builds sections as they scroll into view, so scroll the list to the Notes box.
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag("notes"))
+        rule.onNodeWithTag("notes").assertIsDisplayed()
         rule.onNodeWithTag("notes").performTextInput("Cotton, rack 4")
         rule.onNodeWithText("14 / 500").assertExists()
     }

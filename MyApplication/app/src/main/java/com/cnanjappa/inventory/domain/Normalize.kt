@@ -78,7 +78,7 @@ data class VariantInput(
     val sleeve: Sleeve?,
 )
 
-enum class Field { NAME, MODEL, SIZE, SLEEVE, COMPANY, COLOUR, QTY, NOTES }
+enum class Field { NAME, MODEL, SIZE, SLEEVE, COMPANY, COLOUR, QTY, CODE, NOTES }
 
 data class FieldError(val field: Field, val message: String)
 
@@ -120,7 +120,7 @@ object Validate {
         val size = Sizes.canonical(sizeText)
         if (input.sleeve == null) errors += FieldError(Field.SLEEVE, "Choose Full or Half")
         val company = text(input.company, Field.COMPANY, NAME_MAX, null)
-        val colour = text(input.colour, Field.COLOUR, COLOUR_MAX, null)
+        val colour = text(input.colour, Field.COLOUR, COLOUR_MAX, "Choose a colour")
         if (errors.isNotEmpty() || size == null) return null to errors
         return NormalizedVariant(company, name, model, colour, size, input.sleeve!!) to emptyList()
     }

@@ -1,5 +1,7 @@
 package com.cnanjappa.inventory.domain
 
+import java.util.Locale
+
 /**
  * Barcode identity. The lookup key is symbology class + exact payload. The only equivalence applied
  * is the standard GTIN one: UPC-A, UPC-E and EAN-13 for the same item map to one 13-digit key.
@@ -38,6 +40,14 @@ object Codes {
 
     private fun isDigits(s: String, len: Int) = s.length == len && digits.matches(s)
 
+    /** GS1 check digit for the first 12 digits of an EAN-13. */
+    fun eanCheck(first12: String): Char {
+        val sum = first12.reversed().withIndex().sumOf { (i, c) -> (c - '0') * if (i % 2 == 0) 3 else 1 }
+        return '0' + (10 - sum % 10) % 10
+    }
+
+    fun isEan13(s: String) = isDigits(s, 13) && s[12] == eanCheck(s.substring(0, 12))
+
     /** Expands an 8-digit UPC-E (number system 0/1 + 6 digits + check) to its 12-digit UPC-A. */
     fun upcEtoA(e: String): String? {
         if (!isDigits(e, 8) || (e[0] != '0' && e[0] != '1')) return null
@@ -60,6 +70,30 @@ object Codes {
         "CODE_39" -> "Code 39"
         else -> format.replace('_', '-')
     }
+}
+
+/**
+ * Barcodes the app generates for tags that have none: EAN-13 in GS1's in-store range (first digit 2,
+ * never printed on manufacturer goods), so they scan like any retail barcode and can't clash with a
+ * real product's code. Layout: "2" + 3-digit shop number + 8-digit serial + check digit.
+ */
+object StoreBarcode {
+    const val MAX_SERIAL = 99_999_999L
+
+    fun prefix(shop: Int) = String.format(Locale.ROOT, "2%03d", shop)
+
+    fun make(shop: Int, serial: Long): String {
+        require(shop in 0..999 && serial in 1..MAX_SERIAL)
+        val body = prefix(shop) + String.format(Locale.ROOT, "%08d", serial)
+        return body + Codes.eanCheck(body)
+    }
+
+    /** Serial of [raw] when it is one of this shop's generated barcodes, else null. */
+    fun serialOf(raw: String, shop: Int): Long? =
+        raw.takeIf { Codes.isEan13(it) && it.startsWith(prefix(shop)) }?.substring(4, 12)?.toLong()
+
+    /** Any in-store EAN-13 (ours or another in-store system's). */
+    fun isStore(raw: String) = Codes.isEan13(raw) && raw[0] == '2'
 }
 
 /**

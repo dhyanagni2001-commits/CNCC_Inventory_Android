@@ -8,20 +8,6 @@ import androidx.room.Query
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
-data class StockGroup(
-    val groupKey: String,
-    val company: String,
-    val name: String,
-    val model: String,
-    val colour: String,
-    val fullQty: Int,
-    val halfQty: Int,
-    val total: Int,
-    val anyArchived: Boolean,
-)
-
-data class SizeRow(val sizeLabel: String, val fullQty: Int, val halfQty: Int, val total: Int, val archived: Boolean)
-
 data class HistoryRow(
     val id: Long,
     val type: String,
@@ -88,27 +74,10 @@ interface InventoryDao {
     fun variantsPaged(q: String): PagingSource<Int, Variant>
 
     @Query(
-        """SELECT groupKey, MIN(company) AS company, MIN(name) AS name, MIN(model) AS model, MIN(colour) AS colour,
-        SUM(CASE WHEN sleeve = 'Full' THEN qty ELSE 0 END) AS fullQty,
-        SUM(CASE WHEN sleeve = 'Half' THEN qty ELSE 0 END) AS halfQty,
-        SUM(qty) AS total, MAX(archived) AS anyArchived
-        FROM variants WHERE (archived = 0 OR qty > 0) AND search LIKE :q ESCAPE '\'
-        GROUP BY groupKey ORDER BY name COLLATE NOCASE, company COLLATE NOCASE, model COLLATE NOCASE, colour COLLATE NOCASE""",
+        """SELECT * FROM variants WHERE (archived = 0 OR qty > 0) AND search LIKE :q ESCAPE '\'
+        ORDER BY name COLLATE NOCASE, company COLLATE NOCASE, model COLLATE NOCASE, colour COLLATE NOCASE, sizeSort, sizeLabel, sleeve""",
     )
-    fun groupsPaged(q: String): PagingSource<Int, StockGroup>
-
-    @Query(
-        """SELECT MIN(sizeLabel) AS sizeLabel,
-        SUM(CASE WHEN sleeve = 'Full' THEN qty ELSE 0 END) AS fullQty,
-        SUM(CASE WHEN sleeve = 'Half' THEN qty ELSE 0 END) AS halfQty,
-        SUM(qty) AS total, MAX(archived) AS archived
-        FROM variants WHERE groupKey = :groupKey AND (archived = 0 OR qty > 0)
-        GROUP BY sizeKey ORDER BY MIN(sizeSort), MIN(sizeLabel)""",
-    )
-    fun sizeBreakdown(groupKey: String): Flow<List<SizeRow>>
-
-    @Query("SELECT * FROM variants WHERE groupKey = :groupKey AND (archived = 0 OR qty > 0) ORDER BY sizeSort, sizeLabel, sleeve")
-    fun groupVariants(groupKey: String): Flow<List<Variant>>
+    fun stockPaged(q: String): PagingSource<Int, Variant>
 
     @Query("SELECT IFNULL(SUM(qty), 0) FROM variants")
     fun totalPieces(): Flow<Int>
@@ -137,6 +106,19 @@ interface InventoryDao {
 
     @Insert
     suspend fun insertAlias(a: BarcodeAlias)
+
+    /** Highest 13-character code starting with [prefix]; fixed-width serials make MAX the newest. */
+    @Query("SELECT MAX(raw) FROM aliases WHERE raw LIKE :prefix || '%' AND length(raw) = 13")
+    suspend fun maxAliasRaw(prefix: String): String?
+
+    @Query("DELETE FROM aliases WHERE `key` = :key")
+    suspend fun deleteAlias(key: String)
+
+    @Query("DELETE FROM alias_candidates WHERE `key` = :key AND variantId = :variantId")
+    suspend fun deleteCandidate(key: String, variantId: Long)
+
+    @Query("SELECT COUNT(*) FROM alias_candidates WHERE `key` = :key")
+    suspend fun candidateCount(key: String): Int
 
     @Query("UPDATE aliases SET variantId = NULL, shared = 1 WHERE `key` = :key")
     suspend fun markShared(key: String)

@@ -67,6 +67,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
+import androidx.navigation.NavBackStackEntry
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.rememberUpdatedState
 import com.cnanjappa.inventory.Container
 import com.cnanjappa.inventory.data.Code
 import com.cnanjappa.inventory.data.LinkResult
@@ -278,6 +282,14 @@ class ScanViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         }
     }
 
+    /**
+     * "Product not found" → staff add or link the product, then come back: the scanner is ready
+     * again (the same label counts once it is moved away and shown again), not stuck on the old result.
+     */
+    private var rearmOnReturn = false
+    fun leaveNotFound() { rearmOnReturn = true }
+    fun onReturn() { if (rearmOnReturn && state is ScanState.NotFound) { rearmOnReturn = false; scanNext() } }
+
     /** Deliberate rearm: the label just used must leave the frame before it can count again. */
     fun scanNext() {
         handle.remove<Long>("sellVariant")
@@ -328,6 +340,26 @@ class ScanViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     }
 }
 
+/**
+ * Receives the code a "Scan existing barcode" scan (ScanMode.CAPTURE) hands back to this screen. The
+ * scanner writes it into this back-stack entry's own saved state, which is not the ViewModel's
+ * SavedStateHandle, so screens must read it here and pass it on.
+ */
+@Composable
+fun CapturedCodeEffect(onCode: (ScannedCode) -> Unit) {
+    val handle = (LocalViewModelStoreOwner.current as? NavBackStackEntry)?.savedStateHandle ?: return
+    val raw by handle.getStateFlow<String?>(CAPTURED_RAW, null).collectAsStateWithLifecycle()
+    val latest by rememberUpdatedState(onCode)
+    LaunchedEffect(raw) {
+        val r = raw ?: return@LaunchedEffect
+        latest(ScannedCode(r, handle[CAPTURED_FMT] ?: Codes.TYPED))
+        handle[CAPTURED_RAW] = null
+    }
+}
+
+private const val CAPTURED_RAW = "capturedRaw"
+private const val CAPTURED_FMT = "capturedFmt"
+
 @Composable
 fun ScanScreen(nav: NavHostController) {
     val vm = appViewModel { c, h -> ScanViewModel(c, h) }
@@ -341,11 +373,12 @@ fun ScanScreen(nav: NavHostController) {
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it; asked = true }
     LaunchedEffect(Unit) { if (!granted && !asked) permission.launch(Manifest.permission.CAMERA) }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.pause("Tap to scan again") }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onReturn() }
     LaunchedEffect(vm.successTick) { if (vm.successTick > 0) haptic.performHapticFeedback(HapticFeedbackType.Confirm) }
     LaunchedEffect(vm.navEvent) {
         when (val e = vm.navEvent ?: return@LaunchedEffect) {
             is ScanNav.Captured -> {
-                nav.previousBackStackEntry?.savedStateHandle?.apply { set("capturedRaw", e.code.raw); set("capturedFmt", e.code.format) }
+                nav.previousBackStackEntry?.savedStateHandle?.apply { set(CAPTURED_RAW, e.code.raw); set(CAPTURED_FMT, e.code.format) }
                 nav.popBackStack()
             }
             is ScanNav.ToReturn -> nav.navigate(Routes.returnItem(e.id)) { popUpTo(Routes.SCAN) { inclusive = true } }
@@ -353,9 +386,9 @@ fun ScanScreen(nav: NavHostController) {
         }
         vm.navEvent = null
     }
-    val findProduct = { nav.navigate(Routes.products()) }
+    val findProduct = { nav.go(Routes.products()) }
 
-    SubScreen(vm.mode.heading, { nav.popBackStack() }) { pad ->
+    SubScreen(vm.mode.heading, { nav.back() }) { pad ->
         Column(
             Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -377,18 +410,18 @@ fun ScanScreen(nav: NavHostController) {
                     BigButton("Scan next", vm::scanNext, container = Color.White, content = successColor())
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OnGreenButton("Undo", { vm.undo(s) }, !vm.busy, Modifier.weight(1f))
-                        OnGreenButton("Done", { nav.popBackStack() }, true, Modifier.weight(1f))
+                        OnGreenButton("Done", { nav.back() }, true, Modifier.weight(1f))
                     }
                 }
                 is ScanState.Undone -> MessageCard(Msg(Tone.SUCCESS, "Sale undone — ${pieces(s.qty)} back", "${s.variant.description}\n${piecesLeft(s.remaining)}")) {
                     BigButton("Scan next", vm::scanNext)
-                    SecondaryButton("Done", { nav.popBackStack() })
+                    SecondaryButton("Done", { nav.back() })
                 }
                 is ScanState.Failed -> MessageCard(s.msg) {
                     if (s.retry != null) BigButton("Try again", { vm.retry(s.retry) }, enabled = !vm.busy)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SecondaryButton("Scan next", vm::scanNext, modifier = Modifier.weight(1f))
-                        SecondaryButton("Done", { nav.popBackStack() }, modifier = Modifier.weight(1f))
+                        SecondaryButton("Done", { nav.back() }, modifier = Modifier.weight(1f))
                     }
                 }
                 is ScanState.NotFound -> NotFound(nav, vm, s.code, findProduct)
@@ -460,8 +493,8 @@ private fun Overlay(text: String) {
 private fun NotFound(nav: NavHostController, vm: ScanViewModel, code: ScannedCode, findProduct: () -> Unit) {
     MessageCard(Msg(Tone.ERROR, "Product not found", "Label: ${code.raw.take(80)} (${Codes.formatLabel(code.format)})")) {
         if (vm.mode == ScanMode.RESTOCK || vm.mode == ScanMode.SELL) {
-            BigButton("Link to existing product", { nav.navigate(Routes.products(code.raw, code.format)) })
-            SecondaryButton("Add new product", { nav.navigate(Routes.form(codeRaw = code.raw, codeFmt = code.format)) }, Modifier.fillMaxWidth())
+            BigButton("Link to existing product", { vm.leaveNotFound(); nav.go(Routes.products(code.raw, code.format)) })
+            SecondaryButton("Add new product", { vm.leaveNotFound(); nav.go(Routes.form(codeRaw = code.raw, codeFmt = code.format)) }, Modifier.fillMaxWidth())
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SecondaryButton("Find product", findProduct, Modifier.weight(1f))
@@ -477,7 +510,7 @@ private fun BatchList(vm: ScanViewModel, nav: NavHostController) {
     vm.batch.forEach { Text("• ${it.code.raw.take(60)} — ${it.status}", fontSize = 16.sp) }
     val n = vm.batch.count { it.linkable }
     BigButton(if (n == 1) "Link 1 barcode" else "Link $n barcodes", vm::linkBatch, enabled = n > 0 && !vm.busy)
-    SecondaryButton("Done", { nav.popBackStack() })
+    SecondaryButton("Done", { nav.back() })
 }
 
 /** Committed sale: a solid green card so the result reads instantly from arm's length. */

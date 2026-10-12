@@ -9,9 +9,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddBox
 import androidx.compose.material.icons.automirrored.filled.AssignmentReturn
 import androidx.compose.material.icons.filled.RemoveShoppingCart
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -45,16 +45,12 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
     val variant = repo.dao.observeVariant(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val aliases = repo.dao.aliasesFor(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** Code waiting for a deliberate "Link barcode" tap: from the product picker or the scanner. */
-    val pendingLink = combine(
-        handle.getStateFlow<String?>("linkRaw", null), handle.getStateFlow<String?>("linkFmt", null),
-        handle.getStateFlow<String?>("capturedRaw", null), handle.getStateFlow<String?>("capturedFmt", null),
-    ) { lr, lf, cr, cf ->
-        when {
-            cr != null -> ScannedCode(cr, cf ?: Codes.TYPED)
-            lr != null -> ScannedCode(lr, lf ?: Codes.TYPED)
-            else -> null
-        }
+    /**
+     * Code waiting for a decision: from "Link to existing product" (needs a deliberate tap), or a
+     * scanned code that already belongs to another item (may be saved as a shared label).
+     */
+    val pendingLink = combine(handle.getStateFlow<String?>("linkRaw", null), handle.getStateFlow<String?>("linkFmt", null)) { raw, fmt ->
+        raw?.let { ScannedCode(it, fmt ?: Codes.TYPED) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     var restockQty by mutableStateOf(handle["restockQty"] ?: 1)
@@ -62,13 +58,18 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
     var restocked by mutableStateOf<Int?>(null)
     var takenBy by mutableStateOf<Long?>(null)
 
+    /** Opened from the scanner's "Link to existing product": after linking, offer the way straight back. */
+    private val fromScan = handle.get<String>("linkRaw") != null
+    var backToScanner by mutableStateOf(false)
+        private set
+
     init {
         recover(KEY_SELL) { r -> msg = Msg(Tone.SUCCESS, "1 item reduced — ${piecesLeft(r.remaining!!)}"); lastSaleId = r.refId }
         recover(KEY_RESTOCK) { r -> msg = Msg(Tone.SUCCESS, "${pieces(r.qty!!)} added — ${piecesLeft(r.remaining!!)}") }
         recover(KEY_CORRECT) { r -> msg = Msg(Tone.SUCCESS, "Stock corrected — ${piecesLeft(r.remaining!!)}") }
     }
 
-    private fun clearResult() { lastSaleId = null; restocked = null; takenBy = null }
+    private fun clearResult() { lastSaleId = null; restocked = null; takenBy = null; backToScanner = false }
 
     fun sell() {
         clearResult()
@@ -107,16 +108,37 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
         viewModelScope.launch {
             val r = repo.link(id, code, share)
             when (r.result) {
-                LinkResult.LINKED -> { msg = Msg(Tone.SUCCESS, "Barcode linked", "Stock unchanged"); clearPending() }
-                LinkResult.ALREADY -> { msg = Msg(Tone.INFO, "This barcode is already linked to this item"); clearPending() }
-                LinkResult.SHARED -> { msg = Msg(Tone.SUCCESS, "Saved as shared label", "Staff will choose the exact item when scanning it. Stock unchanged."); clearPending() }
-                LinkResult.TAKEN -> { msg = failMsg(com.cnanjappa.inventory.data.Code.LABEL_TAKEN); takenBy = r.otherVariantId }
+                LinkResult.LINKED -> { msg = Msg(Tone.SUCCESS, "Barcode linked", "Stock unchanged"); clearPending(); backToScanner = fromScan }
+                LinkResult.ALREADY -> { msg = Msg(Tone.INFO, "This barcode is already linked to this item"); clearPending(); backToScanner = fromScan }
+                LinkResult.SHARED -> { msg = Msg(Tone.SUCCESS, "Saved as shared label", "Staff will choose the exact item when scanning it. Stock unchanged."); clearPending(); backToScanner = fromScan }
+                LinkResult.TAKEN -> {
+                    // Keep the code so staff can still save it as a shared label.
+                    handle["linkRaw"] = code.raw; handle["linkFmt"] = code.format
+                    msg = failMsg(com.cnanjappa.inventory.data.Code.LABEL_TAKEN); takenBy = r.otherVariantId
+                }
             }
         }
     }
 
+    var generating by mutableStateOf(false)
+        private set
+
+    /** Gives an item without a tag barcode a new shop barcode (never reused), ready to print. */
+    fun generateBarcode() {
+        if (generating) return // a double tap must not link two codes
+        generating = true
+        clearResult()
+        viewModelScope.launch {
+            val code = repo.newStoreBarcode()
+            msg = if (code != null && repo.link(id, code, share = false).result == LinkResult.LINKED)
+                Msg(Tone.SUCCESS, "New barcode ${code.raw}", "Print labels to stick it on the tag. Stock unchanged.")
+            else Msg(Tone.ERROR, "Could not make a new barcode", "Scan or type the code instead.")
+            generating = false
+        }
+    }
+
     fun clearPending() {
-        listOf("linkRaw", "linkFmt", "capturedRaw", "capturedFmt").forEach { handle[it] = null }
+        listOf("linkRaw", "linkFmt").forEach { handle[it] = null }
         takenBy = null
     }
 
@@ -141,27 +163,32 @@ fun VariantScreen(nav: NavHostController) {
     val v by vm.variant.collectAsStateWithLifecycle()
     val aliases by vm.aliases.collectAsStateWithLifecycle()
     val pending by vm.pendingLink.collectAsStateWithLifecycle()
-    SubScreen("Product", { nav.popBackStack() }) { pad ->
+    val scroll = rememberScrollState()
+    // Scanned after tapping Link barcode: that tap was the decision, so link without asking again.
+    CapturedCodeEffect { vm.link(it, share = false) }
+    // Results show at the top; actions like Link barcode sit further down the page.
+    LaunchedEffect(vm.msg) { if (vm.msg != null) scroll.animateScrollTo(0) }
+    SubScreen("Product", { nav.back() }) { pad ->
         val variant = v ?: return@SubScreen
         Column(
-            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.fillMaxSize().padding(pad).verticalScroll(scroll).padding(16.dp),
             verticalArrangement = BodyArrangement,
         ) {
             VariantHeader(variant)
-            pending?.let { code ->
+            pending?.takeIf { vm.takenBy == null }?.let { code ->
                 MessageCard(Msg(Tone.INFO, "Link this barcode?", "${code.raw.take(80)} (${Codes.formatLabel(code.format)})\nLinking does not change stock.")) {
-                    if (vm.takenBy == null) {
-                        BigButton("Link barcode", { vm.link(code, share = false) })
-                        SecondaryButton("Cancel", vm::clearPending)
-                    }
+                    BigButton("Link barcode", { vm.link(code, share = false) })
+                    SecondaryButton("Cancel", vm::clearPending)
                 }
             }
             vm.msg?.let { m ->
                 MessageCard(m) {
+                    // Straight back to Sell/Return, skipping the product list it came through.
+                    if (vm.backToScanner) BigButton("Back to scanner", { nav.popBackStack(Routes.SCAN, inclusive = false) })
                     vm.lastSaleId?.let { SecondaryButton("Undo", vm::undo, enabled = !vm.busy) }
-                    vm.restocked?.let { n -> SecondaryButton("Generate labels for these $n", { nav.navigate(Routes.labels(vm.id, n)) }) }
+                    vm.restocked?.let { n -> SecondaryButton("Generate labels for these $n", { nav.go(Routes.labels(vm.id, n)) }) }
                     vm.takenBy?.let { other ->
-                        SecondaryButton("View item", { nav.navigate(Routes.variant(other)) })
+                        SecondaryButton("View item", { nav.go(Routes.variant(other)) })
                         pending?.let { code ->
                             SecondaryButton("It is printed on both items (shared label)", { vm.link(code, share = true) })
                             SecondaryButton("Cancel", vm::clearPending)
@@ -173,7 +200,7 @@ fun VariantScreen(nav: NavHostController) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 BigButton("Sell 1", vm::sell, Modifier.weight(1f), icon = Icons.Default.RemoveShoppingCart, enabled = !vm.busy && !variant.archived && variant.qty > 0)
                 BigButton(
-                    "Return 1", { nav.navigate(Routes.returnItem(vm.id)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Filled.AssignmentReturn,
+                    "Return 1", { nav.go(Routes.returnItem(vm.id)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Filled.AssignmentReturn,
                     container = MaterialTheme.colorScheme.primaryContainer, content = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
@@ -191,8 +218,8 @@ fun VariantScreen(nav: NavHostController) {
 
             SectionCard(title = "Labels", subtitle = "Existing manufacturer barcodes work without printing") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SecondaryButton("Print labels", { nav.navigate(Routes.labels(vm.id, 1)) }, Modifier.weight(1f))
-                    SecondaryButton("For current stock", { nav.navigate(Routes.labels(vm.id, variant.qty.coerceAtLeast(1))) }, Modifier.weight(1f))
+                    SecondaryButton("Print labels", { nav.go(Routes.labels(vm.id, 1)) }, Modifier.weight(1f))
+                    SecondaryButton("For current stock", { nav.go(Routes.labels(vm.id, variant.qty.coerceAtLeast(1))) }, Modifier.weight(1f))
                 }
                 Text("Item code  ${variant.code}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -202,9 +229,10 @@ fun VariantScreen(nav: NavHostController) {
                     Text("${a.raw.take(60)}  ·  ${Codes.formatLabel(a.format)}" + if (a.shared) "  ·  shared label" else "", style = MaterialTheme.typography.bodyLarge)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SecondaryButton("Link barcode", { nav.navigate(Routes.scan(ScanMode.CAPTURE)) }, Modifier.weight(1f))
-                    SecondaryButton("Link many", { nav.navigate(Routes.scan(ScanMode.LINK, vm.id)) }, Modifier.weight(1f))
+                    SecondaryButton("Link barcode", { nav.go(Routes.scan(ScanMode.CAPTURE)) }, Modifier.weight(1f))
+                    SecondaryButton("Link many", { nav.go(Routes.scan(ScanMode.LINK, vm.id)) }, Modifier.weight(1f))
                 }
+                SecondaryButton("Generate new barcode", vm::generateBarcode, Modifier.fillMaxWidth(), Icons.Default.AddBox, enabled = !vm.generating)
             }
 
             SectionCard(title = "Item details") {
@@ -212,8 +240,8 @@ fun VariantScreen(nav: NavHostController) {
                     Text("Notes", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(variant.notes, style = MaterialTheme.typography.bodyLarge)
                 }
-                SecondaryButton("Add another size / sleeve", { nav.navigate(Routes.form(copy = vm.id)) }, Modifier.fillMaxWidth())
-                SecondaryButton("Edit details", { nav.navigate(Routes.form(edit = vm.id)) }, Modifier.fillMaxWidth())
+                SecondaryButton("Add another size / sleeve", { nav.go(Routes.form(copy = vm.id)) }, Modifier.fillMaxWidth())
+                SecondaryButton("Edit details", { nav.go(Routes.form(edit = vm.id)) }, Modifier.fillMaxWidth())
                 SecondaryButton(if (variant.archived) "Make active again" else "Archive item", { vm.setArchived(!variant.archived) }, Modifier.fillMaxWidth())
             }
         }

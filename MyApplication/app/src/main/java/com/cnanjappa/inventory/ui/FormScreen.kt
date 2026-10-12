@@ -21,6 +21,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +49,8 @@ import com.cnanjappa.inventory.domain.Codes
 import com.cnanjappa.inventory.domain.Colours
 import com.cnanjappa.inventory.domain.Field
 import com.cnanjappa.inventory.domain.FieldError
+import androidx.compose.material.icons.filled.AddBox
+import com.cnanjappa.inventory.domain.StoreBarcode
 import com.cnanjappa.inventory.domain.NAME_MAX
 import com.cnanjappa.inventory.domain.NOTES_MAX
 import com.cnanjappa.inventory.domain.SIZE_MAX
@@ -59,6 +65,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 data class Saved(val id: Long, val qty: Int, val labels: Boolean)
@@ -75,8 +82,8 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     var model by field("model", "")
     var colour by field("colour", "")
     var size by field("size", "")
-    // Full is the usual case, so a new product starts on Full; Half is one tap.
-    var sleeve by mutableStateOf(handle.get<String>("sleeve")?.let { Sleeve.valueOf(it) } ?: Sleeve.FULL)
+    // No default: Full and Half of one model are different items, so staff must choose.
+    var sleeve by mutableStateOf(handle.get<String>("sleeve")?.let { Sleeve.valueOf(it) })
     var qty by field("qty", 0)
     var notes by field("notes", "")
     var code by mutableStateOf(handle.get<String>("codeRaw")?.let { ScannedCode(it, handle["codeFmt"] ?: Codes.TYPED) })
@@ -88,6 +95,13 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     var duplicateOf by mutableStateOf<Long?>(null)
     var takenBy by mutableStateOf<Long?>(null)
     var confirmChange by mutableStateOf<Pair<String, String>?>(null)
+
+    // Edit only: the item's barcodes as they will be after saving, plus what it had when loaded.
+    var codes by mutableStateOf(
+        handle.get<ArrayList<String>>("codesRaw").orEmpty().zip(handle.get<ArrayList<String>>("codesFmt").orEmpty()) { r, f -> ScannedCode(r, f) },
+    )
+    private var originalKeys: List<String> = handle["origKeys"] ?: emptyList()
+    private var originalQty: Int = handle["origQty"] ?: 0
     private var initial = snapshot()
     private var original: com.cnanjappa.inventory.data.Variant? = null
 
@@ -110,24 +124,23 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
                 company = v.company; name = v.name; model = v.model; colour = v.colour; size = v.sizeLabel
                 sleeve = if (v.sleeve == Sleeve.FULL.label) Sleeve.FULL else Sleeve.HALF
                 notes = v.notes
+                if (isEdit) {
+                    val aliases = repo.dao.aliasesFor(v.id).first()
+                    codes = aliases.map { ScannedCode(it.raw, it.format) }
+                    originalKeys = aliases.map { it.key }; handle["origKeys"] = ArrayList(originalKeys)
+                    qty = v.qty; originalQty = v.qty; handle["origQty"] = v.qty
+                }
                 handle["loaded"] = true
                 persist()
                 if (isEdit) { original = v; initial = snapshot() }
             }
         } else if (isEdit) viewModelScope.launch { original = repo.dao.variant(editId); initial = snapshot() }
         code?.let { checkCode(it) }
-        viewModelScope.launch {
-            handle.getStateFlow<String?>("capturedRaw", null).collect { raw ->
-                if (raw != null) {
-                    changeCode(ScannedCode(raw, handle["capturedFmt"] ?: Codes.TYPED))
-                    handle["capturedRaw"] = null
-                }
-            }
-        }
         recover(KEY) { r -> saved = Saved(r.variantId!!, r.qty ?: 0, withLabels) }
+        recover(KEY_EDIT) { saved = Saved(editId, 0, false) }
     }
 
-    private fun snapshot() = listOf(company, name, model, colour, size, sleeve?.name, qty, code?.key, notes)
+    private fun snapshot() = listOf(company, name, model, colour, size, sleeve?.name, qty, code?.key, codes.map { it.key }, notes)
     val dirty get() = saved == null && snapshot() != initial
 
     /** Mirrors fields into saved state so rotation and process death keep the form. */
@@ -135,6 +148,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         handle["company"] = company; handle["name"] = name; handle["model"] = model; handle["colour"] = colour
         handle["size"] = size; handle["notes"] = notes; handle["sleeve"] = sleeve?.name; handle["qty"] = qty; handle["share"] = shareCode
         handle["withLabels"] = withLabels; handle["codeRaw"] = code?.raw; handle["codeFmt"] = code?.format
+        handle["codesRaw"] = ArrayList(codes.map { it.raw }); handle["codesFmt"] = ArrayList(codes.map { it.format })
     }
 
     fun update(block: FormViewModel.() -> Unit) {
@@ -142,6 +156,37 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         errors = emptyList(); duplicateOf = null
         persist()
     }
+
+    var generating by mutableStateOf(false)
+        private set
+
+    /** A new in-store barcode for a tag that has none; it is never handed out again. */
+    fun generateCode() {
+        if (generating) return // a double tap must not use up two codes
+        generating = true
+        viewModelScope.launch {
+            repo.newStoreBarcode()?.let(::onCode) ?: run { msg = Msg(Tone.ERROR, "Could not make a new barcode", "Scan or type the code instead.") }
+            generating = false
+        }
+    }
+
+    /** A scanned, typed or generated code: the new item's code, or one more barcode while editing. */
+    fun onCode(c: ScannedCode) = if (isEdit) addCode(c) else changeCode(c)
+
+    private fun addCode(c: ScannedCode) {
+        if (codes.any { it.key == c.key }) return
+        viewModelScope.launch {
+            val other = when (val r = repo.resolve(c)) {
+                is Resolution.One -> r.variant.takeIf { it.id != editId }?.description
+                is Resolution.Many -> "${r.variants.size} items (shared label)"
+                Resolution.Unknown -> null
+            }
+            if (other != null) msg = Msg(Tone.ERROR, "Label belongs to another item", "${c.raw.take(80)} is linked to $other")
+            else { update { codes = codes + c }; msg = null }
+        }
+    }
+
+    fun removeCode(c: ScannedCode) = update { codes = codes - c }
 
     fun changeCode(c: ScannedCode?) {
         update { code = c; shareCode = false; takenBy = null; codeStatus = null }
@@ -162,9 +207,12 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         val (nv, errs) = Validate.variant(VariantInput(company, name, model, colour, size, sleeve))
         val qtyOk = qty in 0..com.cnanjappa.inventory.domain.MAX_QTY
         val cleanNotes = Validate.notes(notes)
-        if (nv == null || !qtyOk || cleanNotes == null) {
+        // Every item must stay scannable: the tag's barcode, or one generated here and printed.
+        val codeMissing = if (isEdit) codes.isEmpty() else code == null
+        if (nv == null || !qtyOk || cleanNotes == null || codeMissing) {
             errors = errs + listOfNotNull(
                 FieldError(Field.QTY, "Use a whole number, 0 or more").takeIf { !qtyOk },
+                FieldError(Field.CODE, "Scan, type or generate a barcode").takeIf { codeMissing },
                 FieldError(Field.NOTES, "Use $NOTES_MAX letters or fewer").takeIf { cleanNotes == null },
             )
             return
@@ -176,9 +224,22 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
                 confirmChange = o.detail to listOf(nv.colour, "Size ${nv.size.label}", nv.sleeve.label).filter { it.isNotEmpty() }.joinToString(" · ")
                 return
             }
-            viewModelScope.launch {
-                val clash = repo.edit(editId, nv, cleanNotes)
-                if (clash != null) { duplicateOf = clash; msg = failMsg(Code.DUPLICATE) } else saved = Saved(editId, 0, false)
+            val add = codes.filter { it.key !in originalKeys }
+            val remove = originalKeys.filter { k -> codes.none { it.key == k } }
+            val newQty = qty
+            op(KEY_EDIT, { repo.editItem(it, editId, nv, cleanNotes, originalQty, newQty, add, remove) }) { r ->
+                when (r.code) {
+                    Code.OK -> { saved = Saved(editId, 0, false); msg = null }
+                    Code.DUPLICATE -> { duplicateOf = r.variantId; msg = failMsg(r.code) }
+                    Code.LABEL_TAKEN -> msg = Msg(Tone.ERROR, "Label belongs to another item", "Remove that barcode, then save again.")
+                    // A sale or restock happened meanwhile: show the real count, keep the typed one to re-check.
+                    Code.STALE -> viewModelScope.launch {
+                        val now = repo.dao.variant(editId)?.qty ?: return@launch
+                        originalQty = now; handle["origQty"] = now
+                        msg = Msg(Tone.ERROR, "Stock changed while you were editing", "It is now ${pieces(now)}. Check the quantity and save again.")
+                    }
+                    else -> msg = failMsg(r.code)
+                }
             }
             return
         }
@@ -200,71 +261,98 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         initial = snapshot()
     }
 
-    companion object { const val KEY = "createOp" }
+    companion object {
+        const val KEY = "createOp"
+        const val KEY_EDIT = "editOp"
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FormScreen(nav: NavHostController) {
     val vm = appViewModel { c, h -> FormViewModel(c, h) }
+    CapturedCodeEffect(vm::onCode)
     var confirmLeave by remember { mutableStateOf(false) }
     BackHandler(enabled = vm.dirty) { confirmLeave = true }
-    val back = { if (vm.dirty) confirmLeave = true else nav.popBackStack() }
+    val back = { if (vm.dirty) confirmLeave = true else nav.back() }
     val title = if (vm.isEdit) "Edit details" else "Add Product"
+    // Sections are built only as they scroll into view, so opening the form doesn't stall the phone.
+    val list = rememberLazyListState()
+    LaunchedEffect(vm.errors) {
+        val first = vm.errors.firstOrNull()?.field ?: return@LaunchedEffect
+        list.animateScrollToItem(SECTION_OF.getValue(first))
+    }
     SubScreen(title, { back() }) { pad ->
-        Column(
-            Modifier.fillMaxSize().padding(pad).imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = BodyArrangement,
+        val saved = vm.saved
+        val names by vm.names.collectAsStateWithLifecycle()
+        val models by vm.models.collectAsStateWithLifecycle()
+        val companies by vm.companies.collectAsStateWithLifecycle()
+        LazyColumn(
+            Modifier.fillMaxSize().padding(pad).imePadding(), state = list,
+            contentPadding = PaddingValues(16.dp), verticalArrangement = BodyArrangement,
         ) {
-            val saved = vm.saved
-            if (saved != null) { SavedPanel(vm, nav, saved); return@Column }
-
-            val names by vm.names.collectAsStateWithLifecycle()
-            val models by vm.models.collectAsStateWithLifecycle()
-            val companies by vm.companies.collectAsStateWithLifecycle()
-            SectionCard(title = "Item", subtitle = "Tap a saved choice, or Add new") {
-                PickField("Product name *", vm.name, names, NAME_MAX, vm.error(Field.NAME), "e.g. White Shirt") { vm.update { name = it } }
-                PickField("Model / sub-name *", vm.model, models, NAME_MAX, vm.error(Field.MODEL), "Use General if there is no model") { vm.update { model = it } }
-                PickField("Company / brand (optional)", vm.company, companies, NAME_MAX, vm.error(Field.COMPANY), "e.g. Ramraj") { vm.update { company = it } }
-            }
-            SectionCard(title = "Size *") { SizeField(vm) }
-            SectionCard(title = "Sleeve *") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Sleeve.entries.forEach { s -> ChoiceButton(s.label, vm.sleeve == s, { vm.update { sleeve = s } }, Modifier.weight(1f)) }
+            if (saved != null) { item("saved") { SavedPanel(vm, nav, saved) }; return@LazyColumn }
+            item("item") {
+                SectionCard(title = "Item", subtitle = "Tap a saved choice, or Add new") {
+                    PickField("Product name *", vm.name, names, NAME_MAX, vm.error(Field.NAME), "e.g. White Shirt") { vm.update { name = it } }
+                    PickField("Model / sub-name *", vm.model, models, NAME_MAX, vm.error(Field.MODEL), "Use General if there is no model") { vm.update { model = it } }
+                    PickField("Company / brand (optional)", vm.company, companies, NAME_MAX, vm.error(Field.COMPANY), "e.g. Ramraj") { vm.update { company = it } }
                 }
-                FieldHint(vm.error(Field.SLEEVE))
             }
-            SectionCard(title = "Colour", subtitle = "Optional") { ColourField(vm) }
-            if (!vm.isEdit) {
-                SectionCard(title = "Opening quantity *", subtitle = "Pieces of this exact item received") {
+            item("size") { SectionCard(title = "Size *") { SizeField(vm) } }
+            item("sleeve") {
+                SectionCard(title = "Sleeve *") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Sleeve.entries.forEach { s -> ChoiceButton(s.label, vm.sleeve == s, { vm.update { sleeve = s } }, Modifier.weight(1f)) }
+                    }
+                    FieldHint(vm.error(Field.SLEEVE))
+                }
+            }
+            item("colour") { SectionCard(title = "Colour *") { ColourField(vm) } }
+            item("qty") {
+                SectionCard(
+                    title = if (vm.isEdit) "Quantity in stock *" else "Opening quantity *",
+                    subtitle = if (vm.isEdit) "A change is saved in History as a correction" else "Pieces of this exact item received",
+                ) {
                     QtyStepper(vm.qty, { vm.update { qty = it } }, min = 0)
                     FieldHint(vm.error(Field.QTY))
                 }
-                SectionCard(title = "Existing barcode", subtitle = "Optional — reuse the code already on the tag") { CodeField(vm, nav) }
             }
-            SectionCard(title = "Notes", subtitle = "Optional — anything extra: fabric, supplier, rack, price tag...") {
-                OutlinedTextField(
-                    value = vm.notes, onValueChange = { vm.update { notes = it.take(NOTES_MAX) } },
-                    modifier = Modifier.fillMaxWidth().testTag("notes"), minLines = 3, maxLines = 6,
-                    placeholder = { Text("e.g. Cotton, from Erode supplier, rack 4") }, isError = vm.error(Field.NOTES) != null,
-                    supportingText = { Text("${vm.notes.length} / $NOTES_MAX") },
-                )
-                FieldHint(vm.error(Field.NOTES))
+            item("code") {
+                SectionCard(
+                    title = if (vm.isEdit) "Barcodes *" else "Barcode *",
+                    subtitle = "Scan or type the code on the tag. No barcode on the tag? Generate one and print labels.",
+                ) { if (vm.isEdit) EditCodesField(vm, nav) else CodeField(vm, nav) }
             }
-            vm.msg?.let { m ->
-                MessageCard(m) {
-                    vm.duplicateOf?.let { id -> BigButton(if (vm.isEdit) "View item" else "Add stock", { nav.navigate(Routes.variant(id)) }) }
-                    vm.takenBy?.let { id ->
-                        SecondaryButton("View item", { nav.navigate(Routes.variant(id)) })
-                        SecondaryButton("Save as shared label", { vm.update { shareCode = true }; vm.takenBy = null; vm.msg = null; vm.save() })
-                    }
+            item("notes") {
+                SectionCard(title = "Notes", subtitle = "Optional — anything extra: fabric, supplier, rack, price tag...") {
+                    OutlinedTextField(
+                        value = vm.notes, onValueChange = { vm.update { notes = it.take(NOTES_MAX) } },
+                        modifier = Modifier.fillMaxWidth().testTag("notes"), minLines = 3, maxLines = 6,
+                        placeholder = { Text("e.g. Cotton, from Erode supplier, rack 4") }, isError = vm.error(Field.NOTES) != null,
+                        supportingText = { Text("${vm.notes.length} / $NOTES_MAX") },
+                    )
+                    FieldHint(vm.error(Field.NOTES))
                 }
             }
-            if (vm.errors.isNotEmpty()) FieldHint("Check the highlighted fields")
-            if (vm.isEdit) BigButton("Save changes", { vm.save() }, enabled = !vm.busy)
-            else {
-                BigButton("Save product", { vm.update { withLabels = false }; vm.save() }, enabled = !vm.busy)
-                SecondaryButton("Save & generate labels", { vm.update { withLabels = true }; vm.save() }, Modifier.fillMaxWidth(), enabled = !vm.busy)
+            item("save") {
+                Column(verticalArrangement = BodyArrangement) {
+                    vm.msg?.let { m ->
+                        MessageCard(m) {
+                            vm.duplicateOf?.let { id -> BigButton(if (vm.isEdit) "View item" else "Add stock", { nav.go(Routes.variant(id)) }) }
+                            vm.takenBy?.let { id ->
+                                SecondaryButton("View item", { nav.go(Routes.variant(id)) })
+                                SecondaryButton("Save as shared label", { vm.update { shareCode = true }; vm.takenBy = null; vm.msg = null; vm.save() })
+                            }
+                        }
+                    }
+                    if (vm.errors.isNotEmpty()) FieldHint("Check the highlighted fields")
+                    if (vm.isEdit) BigButton("Save changes", { vm.save() }, enabled = !vm.busy)
+                    else {
+                        BigButton("Save product", { vm.update { withLabels = false }; vm.save() }, enabled = !vm.busy)
+                        SecondaryButton("Save & print labels", { vm.update { withLabels = true }; vm.save() }, Modifier.fillMaxWidth(), enabled = !vm.busy)
+                    }
+                }
             }
         }
     }
@@ -272,7 +360,7 @@ fun FormScreen(nav: NavHostController) {
         onDismissRequest = { confirmLeave = false },
         title = { Text("Unsaved changes") },
         text = { Text("Leave without saving?") },
-        confirmButton = { TextButton({ confirmLeave = false; nav.popBackStack() }) { Text("Leave") } },
+        confirmButton = { TextButton({ confirmLeave = false; nav.back() }) { Text("Leave") } },
         dismissButton = { TextButton({ confirmLeave = false }) { Text("Keep editing") } },
     )
     vm.confirmChange?.let { (old, new) ->
@@ -289,19 +377,25 @@ fun FormScreen(nav: NavHostController) {
 @Composable
 private fun SavedPanel(vm: FormViewModel, nav: NavHostController, s: Saved) {
     if (vm.isEdit) {
-        MessageCard(Msg(Tone.SUCCESS, "Changes saved")) { BigButton("Done", { nav.popBackStack() }) }
+        MessageCard(Msg(Tone.SUCCESS, "Changes saved")) { BigButton("Done", { nav.back() }) }
         return
     }
     MessageCard(Msg(Tone.SUCCESS, "Product added — ${pieces(s.qty)}")) {
-        if (s.labels && s.qty > 0) BigButton("Make ${s.qty} labels", { nav.navigate(Routes.labels(s.id, s.qty)) })
+        if (s.labels && s.qty > 0) BigButton("Make ${s.qty} labels", { nav.go(Routes.labels(s.id, s.qty)) })
         if (s.labels && s.qty == 0) Text("Opening quantity is 0, so no labels were made. Use Labels on the product later.", fontSize = 15.sp)
         BigButton("Add another size / sleeve", vm::another)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SecondaryButton("View product", { nav.navigate(Routes.variant(s.id)) { popUpTo(Routes.FORM) { inclusive = true } } }, Modifier.weight(1f))
-            SecondaryButton("Done", { nav.popBackStack() }, Modifier.weight(1f))
+            SecondaryButton("View product", { nav.go(Routes.variant(s.id)) { popUpTo(Routes.FORM) { inclusive = true } } }, Modifier.weight(1f))
+            SecondaryButton("Done", { nav.back() }, Modifier.weight(1f))
         }
     }
 }
+
+/** Form section (LazyColumn item index) holding each field, for scrolling to the first error. */
+private val SECTION_OF = mapOf(
+    Field.NAME to 0, Field.MODEL to 0, Field.COMPANY to 0, Field.SIZE to 1, Field.SLEEVE to 2,
+    Field.COLOUR to 3, Field.QTY to 4, Field.CODE to 5, Field.NOTES to 6,
+)
 
 /** Tap a saved value, or "Add new" to type one. Typing is only needed the first time. */
 @Composable
@@ -396,22 +490,42 @@ private fun ColourField(vm: FormViewModel) {
 
 @Composable
 private fun CodeField(vm: FormViewModel, nav: NavHostController) {
-    var typing by rememberSaveable { mutableStateOf(false) }
-    var typed by rememberSaveable { mutableStateOf("") }
     val code = vm.code
     if (code != null) {
         Text("${code.raw.take(80)} (${Codes.formatLabel(code.format)})", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         vm.codeStatus?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 15.sp) }
         if (vm.shareCode) Text("Will be saved as a shared label", fontSize = 15.sp)
+        if (StoreBarcode.isStore(code.raw)) Text("New shop barcode. Use Save & print labels to print it.", fontSize = 15.sp)
         SecondaryButton("Remove barcode", { vm.changeCode(null) })
         return
     }
+    AddCodeButtons(vm, nav)
+}
+
+/** Edit: every barcode on the item, each removable, and the same ways to add one more. */
+@Composable
+private fun EditCodesField(vm: FormViewModel, nav: NavHostController) {
+    vm.codes.forEach { c ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("${c.raw.take(60)} (${Codes.formatLabel(c.format)})", Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            TextButton({ vm.removeCode(c) }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+        }
+    }
+    AddCodeButtons(vm, nav)
+}
+
+@Composable
+private fun AddCodeButtons(vm: FormViewModel, nav: NavHostController) {
+    var typing by rememberSaveable { mutableStateOf(false) }
+    var typed by rememberSaveable { mutableStateOf("") }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        SecondaryButton("Scan existing barcode", { nav.navigate(Routes.scan(ScanMode.CAPTURE)) }, Modifier.weight(1f), Icons.Default.QrCodeScanner)
+        SecondaryButton("Scan barcode", { nav.go(Routes.scan(ScanMode.CAPTURE)) }, Modifier.weight(1f), Icons.Default.QrCodeScanner)
         SecondaryButton("Type code", { typing = true }, Modifier.weight(1f))
     }
     if (typing) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(typed, { typed = it.take(200).filterNot(Char::isISOControl) }, Modifier.weight(1f), singleLine = true, label = { Text("Barcode number") })
-        SecondaryButton("Use", { if (typed.isNotBlank()) { vm.changeCode(ScannedCode(typed.trim(), Codes.TYPED)); typed = ""; typing = false } })
+        SecondaryButton("Use", { if (typed.isNotBlank()) { vm.onCode(ScannedCode(typed.trim(), Codes.TYPED)); typed = ""; typing = false } })
     }
+    SecondaryButton("Generate new barcode", vm::generateCode, Modifier.fillMaxWidth(), Icons.Default.AddBox, enabled = !vm.generating)
+    FieldHint(vm.error(Field.CODE))
 }

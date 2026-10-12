@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NormalizeTest {
-    private fun input(name: String = "Shirt", model: String = "General", size: String = "L", sleeve: Sleeve? = Sleeve.FULL, company: String = "", colour: String = "") =
+    private fun input(name: String = "Shirt", model: String = "General", size: String = "L", sleeve: Sleeve? = Sleeve.FULL, company: String = "", colour: String = "White") =
         VariantInput(company, name, model, colour, size, sleeve)
 
     @Test fun letterAliasesCollapse() {
@@ -61,9 +61,9 @@ class NormalizeTest {
     }
 
     @Test fun missingRequiredFieldsReportedInOrder() {
-        val (v, errors) = Validate.variant(input(name = "", model = " ", size = "", sleeve = null))
+        val (v, errors) = Validate.variant(input(name = "", model = " ", size = "", sleeve = null, colour = " "))
         assertNull(v)
-        assertEquals(listOf(Field.NAME, Field.MODEL, Field.SIZE, Field.SLEEVE), errors.map { it.field })
+        assertEquals(listOf(Field.NAME, Field.MODEL, Field.SIZE, Field.SLEEVE, Field.COLOUR), errors.map { it.field })
     }
 
     @Test fun controlCharactersAndLengthRejected() {

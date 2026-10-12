@@ -50,6 +50,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import com.cnanjappa.inventory.domain.Codes
+import com.cnanjappa.inventory.domain.StoreBarcode
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -66,7 +69,10 @@ sealed interface PdfState {
 /** Makes label PDFs on request. Nothing here changes stock, variants or codes. */
 class LabelsViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, handle) {
     val id: Long = handle["id"]!!
-    val variant = repo.dao.observeVariant(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    /** The item, carrying the code to print: its generated shop barcode when it has one, else the app's item code. */
+    val variant = combine(repo.dao.observeVariant(id), repo.dao.aliasesFor(id)) { v, aliases ->
+        v?.copy(code = aliases.firstOrNull { StoreBarcode.isStore(it.raw) }?.raw ?: v.code)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     var copies by mutableStateOf(handle["copies"] ?: (handle.get<Int>("count") ?: 1))
     var type by mutableStateOf(LabelType.valueOf(handle["type"] ?: LabelType.CODE128.name))
     var startCell by mutableStateOf(handle["start"] ?: 0)
@@ -132,7 +138,7 @@ fun LabelsScreen(nav: NavHostController) {
     val preset by vm.preset.collectAsStateWithLifecycle()
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { vm.savePdf(context, it) }
     var more by rememberSaveable { mutableStateOf(false) }
-    SubScreen("Labels", { vm.cancel(); nav.popBackStack() }) { pad ->
+    SubScreen("Labels", { vm.cancel(); nav.back() }) { pad ->
         val variant = v ?: return@SubScreen
         Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = BodyArrangement) {
             VariantHeader(variant)
@@ -144,7 +150,7 @@ fun LabelsScreen(nav: NavHostController) {
             QtyStepper(vm.copies, { vm.set(copies = it) }, min = 1, max = 20_000, label = "Number of labels")
             Text("Label type", fontSize = 17.sp)
             ChoiceRow {
-                ChoiceButton("Barcode (Code 128)", vm.type == LabelType.CODE128, { vm.set(type = LabelType.CODE128) })
+                ChoiceButton(if (Codes.isEan13(variant.code!!)) "Barcode (EAN-13)" else "Barcode (Code 128)", vm.type == LabelType.CODE128, { vm.set(type = LabelType.CODE128) })
                 ChoiceButton("QR code", vm.type == LabelType.QR, { vm.set(type = LabelType.QR) })
             }
             Text("Sticker sheet", fontSize = 17.sp)
@@ -170,7 +176,7 @@ fun LabelsScreen(nav: NavHostController) {
                         }, Modifier.weight(1f))
                     }
                     Text("No printer? Save PDF to print elsewhere.", fontSize = 15.sp)
-                    SecondaryButton("Done", { nav.popBackStack() })
+                    SecondaryButton("Done", { nav.back() })
                 }
                 is PdfState.Failed -> MessageCard(Msg(Tone.ERROR, s.text)) { SecondaryButton("Try again", { vm.make(context) }) }
             }

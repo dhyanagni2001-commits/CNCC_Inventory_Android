@@ -7,6 +7,7 @@ import com.cnanjappa.inventory.domain.InternalCode
 import com.cnanjappa.inventory.domain.MAX_QTY
 import com.cnanjappa.inventory.domain.NormalizedVariant
 import com.cnanjappa.inventory.domain.ScannedCode
+import com.cnanjappa.inventory.domain.StoreBarcode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -227,6 +228,28 @@ class InventoryRepository(val db: AppDatabase) {
 
     // ---------------- Identity changes (no stock effect) ----------------
 
+    /**
+     * A new in-store barcode (see [StoreBarcode]) that was never handed out before: the serial is
+     * saved as soon as it is used, so a discarded form still uses it up; it never drops below the
+     * highest code already saved (e.g. after restoring an older backup); linked codes are skipped.
+     * Null only when all serials are used up.
+     */
+    suspend fun newStoreBarcode(): ScannedCode? = withContext(NonCancellable + Dispatchers.IO) {
+        tx {
+            val shop = dao.setting(KEY_STORE_SHOP)?.toIntOrNull()
+                ?: SecureRandom().nextInt(1000).also { dao.putSetting(Setting(KEY_STORE_SHOP, "$it")) }
+            val highest = dao.maxAliasRaw(StoreBarcode.prefix(shop))?.let { StoreBarcode.serialOf(it, shop) } ?: 0L
+            var serial = maxOf(dao.setting(KEY_STORE_SERIAL)?.toLongOrNull() ?: 0L, highest)
+            var raw: String
+            do {
+                if (++serial > StoreBarcode.MAX_SERIAL) return@tx null
+                raw = StoreBarcode.make(shop, serial)
+            } while (Codes.lookupKeys(raw, EAN_13).any { dao.alias(it) != null })
+            dao.putSetting(Setting(KEY_STORE_SERIAL, "$serial"))
+            ScannedCode(raw, EAN_13)
+        }
+    }
+
     suspend fun link(variantId: Long, code: ScannedCode, share: Boolean): LinkOutcome =
         withContext(NonCancellable + Dispatchers.IO) { tx { linkInTx(variantId, code, share) } }
 
@@ -260,16 +283,44 @@ class InventoryRepository(val db: AppDatabase) {
         }
     }
 
-    /** Edits descriptive fields; the internal code, stock and history stay. Returns the clashing id, if any. */
-    suspend fun edit(variantId: Long, v: NormalizedVariant, notes: String): Long? = withContext(NonCancellable + Dispatchers.IO) {
-        tx {
-            dao.variantByIdentity(v.identityKey)?.takeIf { it.id != variantId }?.let { return@tx it.id }
-            dao.updateDetails(
-                variantId, v.company, v.name, v.model, v.colour, v.size.label, v.size.key, v.size.sort,
-                v.sleeve.label, v.identityKey, v.groupKey, searchText(v, notes), notes,
-            )
-            null
+    /**
+     * Saves a whole Edit in one transaction, or nothing: details, barcodes removed ([removeKeys]) and
+     * added ([add]), and the quantity. A quantity change is recorded as a correction in History and is
+     * refused (STALE) if stock moved since the form loaded [expectedQty]. Rejects DUPLICATE when the
+     * new details match another item, LABEL_TAKEN when an added code belongs to another item.
+     */
+    suspend fun editItem(
+        opId: String, variantId: Long, v: NormalizedVariant, notes: String,
+        expectedQty: Int, newQty: Int, add: List<ScannedCode>, removeKeys: List<String>,
+    ): OpResult = runOp(
+        opId, "EDIT",
+        "$variantId|${v.identityKey}|${notes.hashCode()}|$expectedQty|$newQty|${add.joinToString(",") { it.key }}|${removeKeys.joinToString(",")}",
+    ) {
+        if (newQty !in 0..MAX_QTY) throw Reject(Code.INVALID)
+        dao.variant(variantId) ?: throw Reject(Code.NOT_FOUND)
+        dao.variantByIdentity(v.identityKey)?.takeIf { it.id != variantId }?.let { throw Reject(Code.DUPLICATE, it.id) }
+        dao.updateDetails(
+            variantId, v.company, v.name, v.model, v.colour, v.size.label, v.size.key, v.size.sort,
+            v.sleeve.label, v.identityKey, v.groupKey, searchText(v, notes), notes,
+        )
+        for (key in removeKeys) {
+            val a = dao.alias(key) ?: continue
+            if (!a.shared) { if (a.variantId == variantId) dao.deleteAlias(key) }
+            else {
+                dao.deleteCandidate(key, variantId)
+                if (dao.candidateCount(key) == 0) dao.deleteAlias(key)
+            }
         }
+        for (code in add) {
+            val r = linkInTx(variantId, code, share = false)
+            if (r.result == LinkResult.TAKEN) throw Reject(Code.LABEL_TAKEN, r.otherVariantId)
+        }
+        if (newQty != expectedQty) {
+            if (dao.setQty(variantId, expectedQty, newQty) != 1) throw Reject(Code.STALE, variantId)
+            val delta = newQty - expectedQty
+            dao.insertMovement(Movement(opId = opId, variantId = variantId, type = MoveType.ADJUST, delta = delta, qty = kotlin.math.abs(delta), ts = now(), note = "Edited", description = dao.variant(variantId)!!.description))
+        }
+        OpResult(Code.OK, variantId, newQty, qty = newQty - expectedQty)
     }
 
     suspend fun setArchived(variantId: Long, archived: Boolean) =
@@ -283,6 +334,9 @@ class InventoryRepository(val db: AppDatabase) {
         const val KEY_CATALOG = "catalog"
         const val KEY_LAST_BACKUP = "lastBackup"
         const val KEY_LABEL_PRESET = "labelPreset"
+        const val KEY_STORE_SHOP = "storeBarcodeShop"
+        const val KEY_STORE_SERIAL = "storeBarcodeSerial"
+        private const val EAN_13 = "EAN_13"
         fun now() = System.currentTimeMillis()
 
         /** Notes are searchable too, so "linen" or "rack 4" finds the item. */

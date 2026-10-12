@@ -1,6 +1,5 @@
 package com.cnanjappa.inventory.ui
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -237,15 +236,13 @@ fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modi
 /** Selection pill: changes a choice only, never stock. Selected = tinted fill, primary border and a check. */
 @Composable
 fun ChoiceButton(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, swatch: Color? = null) {
+    // Forms show dozens of these at once, so no per-chip animations: the ripple is the tap feedback.
     val scheme = MaterialTheme.colorScheme
-    val bg by animateColorAsState(if (selected) scheme.primaryContainer else scheme.surface, tween(PRESS_MS), label = "chipBg")
-    val source = remember { MutableInteractionSource() }
     Surface(
         onClick = onClick,
-        interactionSource = source,
-        modifier = modifier.sizeIn(minWidth = 56.dp, minHeight = 48.dp).scale(pressScale(source)).semantics { this.selected = selected },
+        modifier = modifier.sizeIn(minWidth = 56.dp, minHeight = 48.dp).semantics { this.selected = selected },
         shape = RoundedCornerShape(14.dp),
-        color = bg,
+        color = if (selected) scheme.primaryContainer else scheme.surface,
         contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSurface,
         border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) scheme.primary else scheme.outlineVariant),
     ) {

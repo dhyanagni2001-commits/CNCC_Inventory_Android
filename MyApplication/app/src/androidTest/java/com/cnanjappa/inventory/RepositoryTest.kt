@@ -14,6 +14,7 @@ import com.cnanjappa.inventory.domain.Codes
 import com.cnanjappa.inventory.domain.InternalCode
 import com.cnanjappa.inventory.domain.ScannedCode
 import com.cnanjappa.inventory.domain.Sleeve
+import com.cnanjappa.inventory.domain.StoreBarcode
 import com.cnanjappa.inventory.domain.Validate
 import com.cnanjappa.inventory.domain.VariantInput
 import kotlinx.coroutines.Dispatchers
@@ -177,6 +178,33 @@ class RepositoryTest {
         assertEquals(b, (repo.resolve(ScannedCode("01234565", "UPC_E")) as Resolution.One).variant.id)
     }
 
+    @Test fun generatedBarcodesAreValidAndNeverReused() = runBlocking {
+        val seen = HashSet<String>()
+        repeat(50) {
+            val c = repo.newStoreBarcode()!!
+            assertTrue(c.raw, Codes.isEan13(c.raw) && StoreBarcode.isStore(c.raw))
+            assertTrue("repeated ${c.raw}", seen.add(c.raw))
+        }
+        val linked = repo.newStoreBarcode()!!
+        val id = create(1, code = linked)
+        // The printed EAN-13 label scans back to the item.
+        assertEquals(id, (repo.resolve(ScannedCode(linked.raw, "EAN_13")) as Resolution.One).variant.id)
+
+        // A code someone already typed in is skipped.
+        val shop = dao.setting(InventoryRepository.KEY_STORE_SHOP)!!.toInt()
+        val next = StoreBarcode.make(shop, dao.setting(InventoryRepository.KEY_STORE_SERIAL)!!.toLong() + 1)
+        create(1, size = "XL", code = ScannedCode(next, Codes.TYPED))
+        assertTrue(repo.newStoreBarcode()!!.raw != next)
+
+        // An older backup restored (saved serial goes back): still never below codes already in use.
+        repo.setSetting(InventoryRepository.KEY_STORE_SERIAL, "0")
+        repeat(5) { val c = repo.newStoreBarcode()!!.raw; assertTrue("reissued $c", c !in seen && c != linked.raw && c != next) }
+
+        // All serials used up: no code (and no crash) rather than wrapping round to an old one.
+        repo.setSetting(InventoryRepository.KEY_STORE_SERIAL, "${StoreBarcode.MAX_SERIAL}")
+        assertEquals(null, repo.newStoreBarcode())
+    }
+
     @Test fun linkingNeverStealsACodeAndSharingNeedsChoice() = runBlocking {
         val code = ScannedCode("SHIRT-001", "CODE_128")
         val a = create(1, code = code)
@@ -211,7 +239,7 @@ class RepositoryTest {
         val v = dao.variant(id)!!
         assertEquals("Linen, rack 4", v.notes)
         assertTrue(v.search.contains("linen"))
-        assertEquals(null, repo.edit(id, nv(), "Cotton"))
+        assertEquals(Code.OK, repo.editItem(newOpId(), id, nv(), "Cotton", 2, 2, emptyList(), emptyList()).code)
         val e = dao.variant(id)!!
         assertEquals("Cotton", e.notes); assertEquals(v.identityKey, e.identityKey); assertEquals(2, e.qty)
         assertTrue(!e.search.contains("linen") && e.search.contains("cotton"))
@@ -220,8 +248,41 @@ class RepositoryTest {
     @Test fun editIntoAnExistingIdentityReportsClash() = runBlocking {
         val a = create(1)
         val b = create(1, size = "XL")
-        assertEquals(a, repo.edit(b, nv(size = "L"), ""))
+        val r = repo.editItem(newOpId(), b, nv(size = "L"), "", 1, 1, emptyList(), emptyList())
+        assertEquals(Code.DUPLICATE, r.code); assertEquals(a, r.variantId)
         assertEquals("XL", dao.variant(b)!!.sizeLabel)
+    }
+
+    @Test fun editChangesEveryFieldQuantityAndBarcodesTogether() = runBlocking {
+        val old = ScannedCode("OLD-TAG-1", "CODE_128")
+        val id = create(5, code = old)
+        val new = ScannedCode("8901000000019", "EAN_13")
+        val half = Validate.variant(VariantInput("Siyaram", "Kurta", "Festive", "Cream", "42", Sleeve.HALF)).first!!
+        assertEquals(Code.OK, repo.editItem(newOpId(), id, half, "Silk", 5, 3, listOf(new), listOf(old.key)).code)
+        val v = dao.variant(id)!!
+        assertEquals(listOf("Siyaram", "Kurta", "Festive", "Cream", "42", "Half", "Silk", 3), listOf(v.company, v.name, v.model, v.colour, v.sizeLabel, v.sleeve, v.notes, v.qty))
+        assertEquals(Resolution.Unknown, repo.resolve(old))
+        assertEquals(id, (repo.resolve(new) as Resolution.One).variant.id)
+        // The quantity change is in History as a correction (tearDown also checks the ledger reconciles).
+        val delta = db.useWriterConnection { c ->
+            c.usePrepared("SELECT delta FROM movements WHERE variantId = $id AND type = '${MoveType.ADJUST}'") { st -> st.step(); st.getLong(0) }
+        }
+        assertEquals(-2L, delta)
+    }
+
+    @Test fun editIsAllOrNothing() = runBlocking {
+        val a = create(1, code = ScannedCode("A-TAG", "CODE_128"))
+        val b = create(4, size = "XL", code = ScannedCode("B-TAG", "CODE_128"))
+        val changed = nv(name = "Renamed", size = "XL")
+        // Adding a code that belongs to another item rejects the whole edit.
+        assertEquals(Code.LABEL_TAKEN, repo.editItem(newOpId(), b, changed, "", 4, 9, listOf(ScannedCode("A-TAG", "CODE_128")), emptyList()).code)
+        // Stock moved since the form loaded (a sale): rejected, nothing applied.
+        repo.sell(newOpId(), b)
+        assertEquals(Code.STALE, repo.editItem(newOpId(), b, changed, "", 4, 9, emptyList(), listOf(ScannedCode("B-TAG", "CODE_128").key)).code)
+        val v = dao.variant(b)!!
+        assertEquals("Shirt", v.name); assertEquals(3, v.qty)
+        assertEquals(b, (repo.resolve(ScannedCode("B-TAG", "CODE_128")) as Resolution.One).variant.id)
+        assertEquals(a, (repo.resolve(ScannedCode("A-TAG", "CODE_128")) as Resolution.One).variant.id)
     }
 
     @Test fun ledgerTypesMatchOperations() = runBlocking {

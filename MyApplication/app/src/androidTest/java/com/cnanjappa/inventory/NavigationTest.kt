@@ -14,8 +14,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The Home tab must always go Home, even when a tab screen was reached from inside another screen
- * (e.g. Sell → "Find product instead" → Products). Nothing is saved.
+ * Home holds only Sell, Return and Add Product; stock and the Excel report live in the Stock tab.
+ * "Find product" from the scanner is a sub-screen that Back leaves. Nothing is saved.
  */
 @RunWith(AndroidJUnit4::class)
 class NavigationTest {
@@ -26,23 +26,36 @@ class NavigationTest {
         InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(ctx.packageName, Manifest.permission.CAMERA)
     }
 
-    @Test fun homeTabReturnsHomeAfterFindProductFromScanner() {
-        rule.waitUntil(LAUNCH_MS) { rule.onAllNodes(hasText("Sell")).fetchSemanticsNodes().isNotEmpty() }
+    private fun waitFor(text: String) = rule.waitUntil(LAUNCH_MS) { rule.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
+
+    @Test fun homeShowsOnlyTheThreeActions() {
+        waitFor("Sell")
+        rule.onNodeWithText("Return").assertExists()
+        rule.onNodeWithText("Add Product").assertExists()
+        rule.onNodeWithText("Excel report").assertDoesNotExist()
+        rule.onNodeWithText("Products").assertDoesNotExist()
+    }
+
+    @Test fun stockTabHasExcelOnTopAndHomeReturnsHome() {
+        waitFor("Stock")
+        rule.onNodeWithText("Stock").performClick()
+        waitFor("Excel report")
+        rule.onNodeWithText("Scan to add stock").assertExists()
+        rule.onNodeWithText("Home").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Scan a label to sell 1 piece").assertExists()
+    }
+
+    @Test fun findProductFromScannerGoesBack() {
+        waitFor("Sell")
         rule.onNodeWithText("Sell").performClick()
-        rule.waitUntil(LAUNCH_MS) { rule.onAllNodes(hasText("Find product instead")).fetchSemanticsNodes().isNotEmpty() }
+        waitFor("Find product instead")
         rule.onNodeWithText("Find product instead").performScrollTo().performClick()
-        rule.waitUntil(LAUNCH_MS) { rule.onAllNodes(hasText("Home")).fetchSemanticsNodes().isNotEmpty() }
-
-        rule.onNodeWithText("Home").performClick()
-        rule.waitForIdle()
-        rule.onNodeWithText("Scan a label to sell 1 piece").assertExists()
-
-        // And it keeps working on a second round trip.
-        rule.onNodeWithText("Products").performClick()
-        rule.waitForIdle()
-        rule.onNodeWithText("Home").performClick()
-        rule.waitForIdle()
-        rule.onNodeWithText("Scan a label to sell 1 piece").assertExists()
+        waitFor("Find product")
+        rule.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        waitFor("Find product instead")
+        rule.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        waitFor("Scan a label to sell 1 piece")
     }
 
     private companion object { const val LAUNCH_MS = 5_000L }

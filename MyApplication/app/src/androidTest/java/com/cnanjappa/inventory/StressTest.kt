@@ -130,7 +130,7 @@ class StressTest {
         val queries = listOf("shirt", "ramraj kurta", "m01234", "cream 40", "puma", "m00001", "m24999", "polo half", "zzz-none", "towel")
         repeat(300) {
             val q = InventoryRepository.likePattern(queries[it % queries.size])
-            timed("search (stock groups)") { repo.dao.groupsPaged(q).load(PagingSource.LoadParams.Refresh(null, 50, false)) }
+            timed("search (stock)") { repo.dao.stockPaged(q).load(PagingSource.LoadParams.Refresh(null, 50, false)) }
             timed("search (products)") { repo.dao.variantsPaged(q).load(PagingSource.LoadParams.Refresh(null, 50, false)) }
         }
 
