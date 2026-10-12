@@ -96,7 +96,6 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     var notes by field("notes", "")
     var code by mutableStateOf(handle.get<String>("codeRaw")?.let { ScannedCode(it, handle["codeFmt"] ?: Codes.TYPED) })
     var codeStatus by mutableStateOf<String?>(null)
-    var shareCode by field("share", false)
     var errors by mutableStateOf<List<FieldError>>(emptyList())
     var saved by mutableStateOf<Saved?>(null)
     var duplicateOf by mutableStateOf<Long?>(null)
@@ -152,7 +151,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     /** Mirrors fields into saved state so rotation and process death keep the form. */
     fun persist() {
         handle["company"] = company; handle["name"] = name; handle["model"] = model; handle["colour"] = colour
-        handle["size"] = size; handle["notes"] = notes; handle["sleeve"] = sleeve?.name; handle["qty"] = qty; handle["share"] = shareCode
+        handle["size"] = size; handle["notes"] = notes; handle["sleeve"] = sleeve?.name; handle["qty"] = qty
         handle["codeRaw"] = code?.raw; handle["codeFmt"] = code?.format
         handle["codesRaw"] = ArrayList(codes.map { it.raw }); handle["codesFmt"] = ArrayList(codes.map { it.format })
     }
@@ -177,17 +176,27 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     }
 
     /** A scanned, typed or generated code: the new item's code, or one more barcode while editing. */
-    fun onCode(c: ScannedCode) = if (isEdit) addCode(c) else changeCode(c)
+    fun onCode(c: ScannedCode) = if (isEdit) addCode(c) else setNewCode(c)
+
+    /** New item: a barcode already on another item is refused right away, not at Save. */
+    private fun setNewCode(c: ScannedCode) = viewModelScope.launch {
+        val other = usedBy(c)
+        if (other != null) msg = Msg(Tone.ERROR, "Barcode already used", "${c.raw.take(80)} is on: $other\nOne barcode can only be on one item. Use another barcode, or generate a new one.")
+        else { changeCode(c); msg = null }
+    }
+
+    /** Which live item a code is on, or null when it is free. */
+    private suspend fun usedBy(c: ScannedCode): String? = when (val r = repo.resolve(c)) {
+        is Resolution.One -> r.variant.takeIf { it.id != editId }?.description
+        is Resolution.Many -> r.variants.joinToString(", ") { it.description }
+        Resolution.Unknown -> null
+    }
 
     private fun addCode(c: ScannedCode) {
         if (codes.any { it.key == c.key }) return
         viewModelScope.launch {
-            val other = when (val r = repo.resolve(c)) {
-                is Resolution.One -> r.variant.takeIf { it.id != editId }?.description
-                is Resolution.Many -> "${r.variants.size} items (shared label)"
-                Resolution.Unknown -> null
-            }
-            if (other != null) msg = Msg(Tone.ERROR, "Label belongs to another item", "${c.raw.take(80)} is linked to $other")
+            val other = usedBy(c)
+            if (other != null) msg = Msg(Tone.ERROR, "Barcode already used", "${c.raw.take(80)} is on: $other\nOne barcode can only be on one item. Use another barcode, or generate a new one.")
             else { update { codes = codes + c }; msg = null }
         }
     }
@@ -195,7 +204,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     fun removeCode(c: ScannedCode) = update { codes = codes - c }
 
     fun changeCode(c: ScannedCode?) {
-        update { code = c; shareCode = false; takenBy = null; codeStatus = null }
+        update { code = c; takenBy = null; codeStatus = null }
         c?.let { checkCode(it) }
     }
 
@@ -243,7 +252,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
                 when (r.code) {
                     Code.OK -> { saved = Saved(editId, 0); msg = null }
                     Code.DUPLICATE -> { duplicateOf = r.variantId; msg = failMsg(r.code) }
-                    Code.LABEL_TAKEN -> msg = Msg(Tone.ERROR, "Label belongs to another item", "Remove that barcode, then save again.")
+                    Code.LABEL_TAKEN -> msg = Msg(Tone.ERROR, "Barcode already used", "Remove that barcode, then save again. One barcode can only be on one item. Use another barcode, or generate a new one.")
                     // A sale or restock happened meanwhile: show the real count, keep the typed one to re-check.
                     Code.STALE -> viewModelScope.launch {
                         val now = repo.dao.variant(editId)?.qty ?: return@launch
@@ -255,11 +264,11 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
             }
             return
         }
-        op(KEY, { repo.createVariant(it, nv, qty, code, shareCode, cleanNotes) }) { r ->
+        op(KEY, { repo.createVariant(it, nv, qty, code, false, cleanNotes) }) { r ->
             when (r.code) {
                 Code.OK -> { saved = Saved(r.variantId!!, qty); msg = null }
                 Code.DUPLICATE -> { duplicateOf = r.variantId; msg = failMsg(r.code) }
-                Code.LABEL_TAKEN -> { takenBy = r.variantId; msg = Msg(Tone.ERROR, "Label belongs to another item", "If the same barcode is printed on both items, save it as a shared label.") }
+                Code.LABEL_TAKEN -> { takenBy = r.variantId; msg = Msg(Tone.ERROR, "Barcode already used", "One barcode can only be on one item. Use another barcode, or generate a new one.") }
                 else -> msg = failMsg(r.code)
             }
         }
@@ -268,7 +277,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
     /** "Add another size / sleeve": keeps the details, clears quantity and barcode. */
     fun another() {
         saved = null; msg = null
-        update { qty = 0; code = null; codeStatus = null; shareCode = false; takenBy = null }
+        update { qty = 0; code = null; codeStatus = null; takenBy = null }
         initial = snapshot()
     }
 
@@ -309,8 +318,8 @@ fun FormScreen(nav: NavHostController) {
                     ComboField("Company name *", vm.name, names, NAME_MAX, vm.error(Field.NAME), "e.g. Ramraj", "+ Add new company") { vm.update { name = it } }
                     ComboField("Product name *", vm.model, models, NAME_MAX, vm.error(Field.MODEL), "e.g. RR Image", "+ Add new product") { vm.update { model = it } }
                     OutlinedTextField(
-                        value = vm.company, onValueChange = { vm.update { company = it.take(NAME_MAX) } }, modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Comments (optional)") }, singleLine = true, isError = vm.error(Field.COMPANY) != null,
+                        value = vm.company, onValueChange = { vm.update { company = caps(it).take(NAME_MAX) } }, modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Comments (optional)") }, singleLine = true, isError = vm.error(Field.COMPANY) != null, keyboardOptions = CapsKeyboard,
                     )
                     FieldHint(vm.error(Field.COMPANY))
                 }
@@ -343,7 +352,7 @@ fun FormScreen(nav: NavHostController) {
             item("notes") {
                 SectionCard(title = "Notes", subtitle = "Optional — anything extra: fabric, supplier, rack, price tag...") {
                     OutlinedTextField(
-                        value = vm.notes, onValueChange = { vm.update { notes = it.take(NOTES_MAX) } },
+                        value = vm.notes, onValueChange = { vm.update { notes = caps(it).take(NOTES_MAX) } }, keyboardOptions = CapsKeyboard,
                         modifier = Modifier.fillMaxWidth().testTag("notes"), minLines = 3, maxLines = 6,
                         placeholder = { Text("e.g. Cotton, from Erode supplier, rack 4") }, isError = vm.error(Field.NOTES) != null,
                         supportingText = { Text("${vm.notes.length} / $NOTES_MAX") },
@@ -358,7 +367,6 @@ fun FormScreen(nav: NavHostController) {
                             vm.duplicateOf?.let { id -> BigButton(if (vm.isEdit) "View item" else "Add stock", { nav.go(Routes.variant(id)) }) }
                             vm.takenBy?.let { id ->
                                 SecondaryButton("View item", { nav.go(Routes.variant(id)) })
-                                SecondaryButton("Save as shared label", { vm.update { shareCode = true }; vm.takenBy = null; vm.msg = null; vm.save() })
                             }
                         }
                     }
@@ -425,7 +433,7 @@ private fun ComboField(label: String, value: String, options: List<String>, max:
     val shown = if (typed.isEmpty() || known) options else options.filter { it.contains(typed, ignoreCase = true) }
     ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it }) {
         OutlinedTextField(
-            value = value, onValueChange = { onValue(it.take(max)); open = true },
+            value = value, onValueChange = { onValue(caps(it).take(max)); open = true }, keyboardOptions = CapsKeyboard,
             modifier = Modifier.fillMaxWidth().focusRequester(focus).menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
             label = { Text(label) }, placeholder = { Text(placeholder) }, singleLine = true, isError = error != null,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
@@ -469,7 +477,7 @@ private fun SizeField(vm: FormViewModel) {
     }
     if (!adding) SecondaryButton("Add size", { adding = true })
     else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(typed, { typed = it.take(SIZE_MAX) }, Modifier.weight(1f), singleLine = true, placeholder = { Text("e.g. 32 or Free Size") })
+        OutlinedTextField(typed, { typed = caps(it).take(SIZE_MAX) }, Modifier.weight(1f), singleLine = true, placeholder = { Text("e.g. 32 or Free Size") }, keyboardOptions = CapsKeyboard)
         SecondaryButton("Use size", { if (typed.isNotBlank()) { vm.update { size = typed.trim() }; typed = ""; adding = false } })
     }
     FieldHint(vm.error(Field.SIZE))
@@ -499,7 +507,7 @@ private fun ColourField(vm: FormViewModel) {
                 if (others.isNotEmpty()) ChoiceRow { others.forEach { ChoiceButton(it, vm.colour.equals(it, true), { pick(it); sheet = false }, swatch = swatchFor(it)) } }
                 HorizontalDivider()
                 OutlinedTextField(
-                    typed, { typed = it.take(COLOUR_MAX); hint = null }, Modifier.fillMaxWidth(), singleLine = true,
+                    typed, { typed = caps(it).take(COLOUR_MAX); hint = null }, Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = CapsKeyboard,
                     label = { Text("Type colour") }, supportingText = { Text("Up to $COLOUR_MAX letters") }, isError = hint != null,
                 )
                 FieldHint(hint)
@@ -518,7 +526,6 @@ private fun CodeField(vm: FormViewModel, nav: NavHostController) {
     if (code != null) {
         Text("${code.raw.take(80)} (${Codes.formatLabel(code.format)})", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         vm.codeStatus?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 15.sp) }
-        if (vm.shareCode) Text("Will be saved as a shared label", fontSize = 15.sp)
         if (StoreBarcode.isStore(code.raw)) Text("New shop barcode. After saving, print it from the product page (Labels).", fontSize = 15.sp)
         SecondaryButton("Remove barcode", { vm.changeCode(null) })
         return

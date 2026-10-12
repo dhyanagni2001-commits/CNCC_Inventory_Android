@@ -312,7 +312,7 @@ class ScanViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
             val item = when (val r = repo.resolve(code)) {
                 is Resolution.One -> if (r.variant.id == targetVariant) BatchItem(code, "Already linked to this item", false)
                     else BatchItem(code, "Belongs to another item: ${r.variant.description}", false)
-                is Resolution.Many -> BatchItem(code, "Shared label — linked to several items", r.variants.none { it.id == targetVariant })
+                is Resolution.Many -> BatchItem(code, "Already used on other items", false)
                 Resolution.Unknown -> BatchItem(code, "New label", true)
             }
             batch += item
@@ -326,7 +326,7 @@ class ScanViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         viewModelScope.launch {
             var linked = 0
             for (item in todo) {
-                val r = repo.link(targetVariant, item.code, share = item.status.startsWith("Shared"))
+                val r = repo.link(targetVariant, item.code, share = false)
                 if (r.result == LinkResult.LINKED || r.result == LinkResult.SHARED) linked++
             }
             batch.clear(); batchKeys.clear()

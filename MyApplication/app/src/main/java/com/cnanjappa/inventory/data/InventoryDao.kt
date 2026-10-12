@@ -68,6 +68,17 @@ interface InventoryDao {
     @Query("UPDATE variants SET archived = 1, identityKey = 'deleted:' || id WHERE id = :id")
     suspend fun markDeleted(id: Long)
 
+    /** Shop text is kept in capitals; identity and search keys are lower-case, so nothing else changes. */
+    @Query(
+        """UPDATE variants SET company = UPPER(company), name = UPPER(name), model = UPPER(model),
+        colour = UPPER(colour), sizeLabel = UPPER(sizeLabel), notes = UPPER(notes)""",
+    )
+    suspend fun upperCaseText()
+
+    /** Items hidden by the old Archive button: still holding barcodes and their identity. */
+    @Query("SELECT id FROM variants WHERE archived = 1 AND identityKey NOT LIKE 'deleted:%'")
+    suspend fun unfinishedDeletes(): List<Long>
+
     @Query("DELETE FROM aliases WHERE variantId = :variantId")
     suspend fun deleteAliasesOf(variantId: Long)
 
@@ -137,7 +148,7 @@ interface InventoryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertCandidate(c: AliasCandidate)
 
-    @Query("SELECT v.* FROM alias_candidates c JOIN variants v ON v.id = c.variantId WHERE c.`key` = :key ORDER BY v.company, v.sizeSort, v.sleeve")
+    @Query("SELECT v.* FROM alias_candidates c JOIN variants v ON v.id = c.variantId WHERE c.`key` = :key AND v.archived = 0 ORDER BY v.company, v.sizeSort, v.sleeve")
     suspend fun candidates(key: String): List<Variant>
 
     @Query(

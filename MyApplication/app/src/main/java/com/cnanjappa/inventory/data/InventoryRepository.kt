@@ -72,9 +72,16 @@ class InventoryRepository(val db: AppDatabase) {
     // ---------------- Lookup ----------------
 
     suspend fun resolve(code: ScannedCode): Resolution = withContext(Dispatchers.IO) {
-        Codes.lookupKeys(code.raw, code.format).firstNotNullOfOrNull { dao.alias(it) }?.let { a ->
-            if (a.variantId != null) dao.variant(a.variantId)?.let { return@withContext Resolution.One(it) }
-            return@withContext Resolution.Many(a.key, dao.candidates(a.key))
+        // Deleted items never match, whatever is still recorded against them.
+        for (key in Codes.lookupKeys(code.raw, code.format)) {
+            val a = dao.alias(key) ?: continue
+            if (a.variantId != null) {
+                dao.variant(a.variantId)?.takeIf { !it.archived }?.let { return@withContext Resolution.One(it) }
+            } else {
+                val live = dao.candidates(a.key)
+                if (live.size == 1) return@withContext Resolution.One(live.single())
+                if (live.isNotEmpty()) return@withContext Resolution.Many(a.key, live)
+            }
         }
         val catalog = InternalCode.catalogOf(code.raw)
         if (catalog != null && catalog == catalog()) {
@@ -266,7 +273,8 @@ class InventoryRepository(val db: AppDatabase) {
         dao.variantByCode(code.raw)?.let { owner ->
             return if (owner.id == variantId) LinkOutcome(LinkResult.ALREADY) else LinkOutcome(LinkResult.TAKEN, owner.id)
         }
-        val a = dao.alias(code.key)
+        var a = dao.alias(code.key)
+        if (a != null && !a.shared && dao.variant(a.variantId!!)?.archived != false) { dao.deleteAlias(a.key); a = null }
         return when {
             a == null -> {
                 dao.insertAlias(BarcodeAlias(code.key, code.raw, code.format, variantId, false, now()))
@@ -274,8 +282,12 @@ class InventoryRepository(val db: AppDatabase) {
             }
             a.variantId == variantId -> LinkOutcome(LinkResult.ALREADY)
             a.shared -> {
-                if (dao.candidates(a.key).any { it.id == variantId }) LinkOutcome(LinkResult.ALREADY)
-                else { dao.insertCandidate(AliasCandidate(a.key, variantId)); LinkOutcome(LinkResult.SHARED) }
+                val on = dao.candidates(a.key)
+                when {
+                    on.any { it.id == variantId } -> LinkOutcome(LinkResult.ALREADY)
+                    !share -> LinkOutcome(LinkResult.TAKEN, on.firstOrNull()?.id)
+                    else -> { dao.insertCandidate(AliasCandidate(a.key, variantId)); LinkOutcome(LinkResult.SHARED) }
+                }
             }
             !share -> LinkOutcome(LinkResult.TAKEN, a.variantId)
             else -> {
@@ -349,11 +361,38 @@ class InventoryRepository(val db: AppDatabase) {
                 if (dao.setQty(variantId, expectedQty, 0) != 1) throw Reject(Code.STALE, variantId)
                 dao.insertMovement(Movement(opId = opId, variantId = variantId, type = MoveType.ADJUST, delta = -expectedQty, qty = expectedQty, ts = now(), note = "Deleted", description = v.description))
             } else if (v.qty != 0) throw Reject(Code.STALE, variantId)
-            dao.deleteAliasesOf(variantId)
-            for (key in dao.candidateKeysOf(variantId)) dropFromShared(key, variantId)
-            dao.markDeleted(variantId)
+            purge(variantId)
             OpResult(Code.OK, variantId, 0, qty = -expectedQty)
         }
+
+    /** Removes a deleted item's barcodes and frees its identity; the row stays for History. */
+    private suspend fun purge(variantId: Long) {
+        dao.deleteAliasesOf(variantId)
+        for (key in dao.candidateKeysOf(variantId)) dropFromShared(key, variantId)
+        dao.markDeleted(variantId)
+    }
+
+    /** Once: products saved before text was kept in capitals are converted, so lists never mix cases. */
+    suspend fun upperCaseOnce() = withContext(NonCancellable + Dispatchers.IO) {
+        tx {
+            if (dao.setting(KEY_CAPS) == null) { dao.upperCaseText(); dao.putSetting(Setting(KEY_CAPS, "1")) }
+        }
+    }
+
+    /**
+     * Items hidden by the old Archive button now count as deleted. Run once at start: frees their
+     * barcodes and identity, and writes off pieces left as a "Deleted" correction (ledger stays right).
+     */
+    suspend fun finishOldArchives() = withContext(NonCancellable + Dispatchers.IO) {
+        for (id in dao.unfinishedDeletes()) tx {
+            val v = dao.variant(id) ?: return@tx
+            if (v.qty > 0) {
+                dao.setQty(id, v.qty, 0)
+                dao.insertMovement(Movement(opId = newOpId(), variantId = id, type = MoveType.ADJUST, delta = -v.qty, qty = v.qty, ts = now(), note = "Deleted", description = v.description))
+            }
+            purge(id)
+        }
+    }
 
     suspend fun setSetting(key: String, value: String) = withContext(Dispatchers.IO) { dao.putSetting(Setting(key, value)) }
 
@@ -364,6 +403,7 @@ class InventoryRepository(val db: AppDatabase) {
         const val KEY_LAST_BACKUP = "lastBackup"
         const val KEY_LABEL_PRESET = "labelPreset"
         const val KEY_STORE_SHOP = "storeBarcodeShop"
+        const val KEY_CAPS = "textInCapitals"
         const val KEY_STORE_SERIAL = "storeBarcodeSerial"
         private const val EAN_13 = "EAN_13"
         fun now() = System.currentTimeMillis()

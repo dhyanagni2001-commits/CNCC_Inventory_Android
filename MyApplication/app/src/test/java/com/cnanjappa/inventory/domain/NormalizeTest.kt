@@ -45,7 +45,8 @@ class NormalizeTest {
     @Test fun validVariantNormalises() {
         val (v, errors) = Validate.variant(input(name = "  White   Shirt ", company = "Ramraj", colour = "white"))
         assertTrue(errors.isEmpty())
-        assertEquals("White Shirt", v!!.name)
+        assertEquals("WHITE SHIRT", v!!.name) // saved in capitals
+        assertEquals(listOf("RAMRAJ", "WHITE"), listOf(v.company, v.colour))
         assertTrue(v.search.contains("large"))
     }
 
@@ -82,9 +83,9 @@ class NormalizeTest {
 
     @Test fun notesAreCleanedAndLimited() {
         assertEquals("", Validate.notes("   "))
-        assertEquals("Cotton, rack 4", Validate.notes("  Cotton,\track   4 "))
-        assertEquals("Line one\n\nLine two", Validate.notes("Line one\r\n\n\n\n  Line two  "))
-        assertEquals("a b", Validate.notes("a\u0000b"))
+        assertEquals("COTTON, RACK 4", Validate.notes("  Cotton,\track   4 "))
+        assertEquals("LINE ONE\n\nLINE TWO", Validate.notes("Line one\r\n\n\n\n  Line two  "))
+        assertEquals("A B", Validate.notes("a\u0000b"))
         assertEquals(NOTES_MAX, Validate.notes("x".repeat(NOTES_MAX))!!.length)
         assertNull(Validate.notes("x".repeat(NOTES_MAX + 1)))
     }

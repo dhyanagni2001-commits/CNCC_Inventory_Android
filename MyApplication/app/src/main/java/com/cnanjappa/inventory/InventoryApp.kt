@@ -50,6 +50,8 @@ class Container(val appContext: Context) {
         scope.launch {
             _launch.value = try {
                 repo.catalog()
+                repo.finishOldArchives()
+                repo.upperCaseOnce()
                 repo.dao.variantCount()
                 LaunchState.READY
             } catch (e: Exception) {

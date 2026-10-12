@@ -51,7 +51,7 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
 
     /**
      * Code waiting for a decision: from "Link to existing product" (needs a deliberate tap), or a
-     * scanned code that already belongs to another item (may be saved as a shared label).
+     * scanned code that already belongs to another item (refused: one barcode, one item).
      */
     val pendingLink = combine(handle.getStateFlow<String?>("linkRaw", null), handle.getStateFlow<String?>("linkFmt", null)) { raw, fmt ->
         raw?.let { ScannedCode(it, fmt ?: Codes.TYPED) }
@@ -117,9 +117,9 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
                 LinkResult.ALREADY -> { msg = Msg(Tone.INFO, "This barcode is already linked to this item"); clearPending(); backToScanner = fromScan }
                 LinkResult.SHARED -> { msg = Msg(Tone.SUCCESS, "Saved as shared label", "Staff will choose the exact item when scanning it. Stock unchanged."); clearPending(); backToScanner = fromScan }
                 LinkResult.TAKEN -> {
-                    // Keep the code so staff can still save it as a shared label.
+                    // Keep the code on screen so staff see which label was refused.
                     handle["linkRaw"] = code.raw; handle["linkFmt"] = code.format
-                    msg = failMsg(com.cnanjappa.inventory.data.Code.LABEL_TAKEN); takenBy = r.otherVariantId
+                    msg = Msg(Tone.ERROR, "Barcode already used", "One barcode can only be on one item. Use another barcode, or generate a new one."); takenBy = r.otherVariantId
                 }
             }
         }
@@ -214,10 +214,7 @@ fun VariantScreen(nav: NavHostController) {
                     vm.restocked?.let { n -> SecondaryButton("Generate labels for these $n", { nav.go(Routes.labels(vm.id, n)) }) }
                     vm.takenBy?.let { other ->
                         SecondaryButton("View item", { nav.go(Routes.variant(other)) })
-                        pending?.let { code ->
-                            SecondaryButton("It is printed on both items (shared label)", { vm.link(code, share = true) })
-                            SecondaryButton("Cancel", vm::clearPending)
-                        }
+                        if (pending != null) SecondaryButton("Cancel", vm::clearPending)
                     }
                 }
             }
@@ -311,7 +308,7 @@ private fun CorrectSection(vm: VariantViewModel, v: Variant) {
     QtyStepper(counted, { counted = it }, min = 0, label = "Pieces actually on the shelf")
     Text("Reason", style = MaterialTheme.typography.titleMedium)
     ChoiceRow { REASONS.forEach { r -> ChoiceButton(r, reason == r, { reason = r; hint = null }) } }
-    if (reason == "Other") OutlinedTextField(other, { other = it.take(NOTE_MAX) }, Modifier.fillMaxWidth(), label = { Text("Short explanation") }, singleLine = true)
+    if (reason == "Other") OutlinedTextField(other, { other = caps(it).take(NOTE_MAX) }, Modifier.fillMaxWidth(), label = { Text("Short explanation") }, singleLine = true, keyboardOptions = CapsKeyboard)
     FieldHint(hint)
     Text("Current: ${pieces(v.qty)}  →  New: ${pieces(counted)}", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
     BigButton("Confirm: change ${v.qty} to $counted", {

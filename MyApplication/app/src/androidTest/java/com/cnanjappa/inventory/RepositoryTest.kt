@@ -133,6 +133,49 @@ class RepositoryTest {
         assertEquals(false, dao.alias(code.key)!!.shared)
     }
 
+    @Test fun itemsHiddenByOldArchiveNeverScanAndAreCleanedUp() = runBlocking {
+        val tag = ScannedCode("OLD-ARCHIVED", "CODE_128")
+        val id = create(4, code = tag)
+        // What the removed Archive button did: hide the item, keep its barcode.
+        db.useWriterConnection { c -> c.usePrepared("UPDATE variants SET archived = 1 WHERE id = $id") { it.step() } }
+        // Before the clean-up runs: the label no longer finds it, and another item can take the label.
+        assertEquals(Resolution.Unknown, repo.resolve(tag))
+        val other = create(1, size = "XL")
+        assertEquals(LinkResult.LINKED, repo.link(other, tag, share = false).result)
+        assertEquals(other, (repo.resolve(tag) as Resolution.One).variant.id)
+
+        repo.finishOldArchives()
+        assertEquals(0, qty(id)) // written off as "Deleted"; tearDown checks the ledger still reconciles
+        assertTrue(dao.variant(id)!!.identityKey.startsWith("deleted:"))
+        assertEquals(other, (repo.resolve(tag) as Resolution.One).variant.id) // the other item's label is untouched
+        repo.finishOldArchives() // nothing left to do the second time
+    }
+
+    @Test fun oneBarcodeCanOnlyBeOnOneItem() = runBlocking {
+        val code = ScannedCode("ONE-TAG", "CODE_128")
+        val a = create(1, code = code)
+        val b = create(1, size = "XL")
+        assertEquals(LinkResult.TAKEN, repo.link(b, code, share = false).result)
+        assertEquals(Code.LABEL_TAKEN, repo.createVariant(newOpId(), nv(size = "M"), 1, code, false, "").code)
+        // Even a label already shared (from before this rule) takes no further items.
+        val c = create(1, size = "S")
+        assertEquals(LinkResult.SHARED, repo.link(b, code, share = true).result)
+        assertEquals(LinkResult.TAKEN, repo.link(c, code, share = false).result)
+        assertEquals(setOf(a, b), (repo.resolve(code) as Resolution.Many).variants.map { it.id }.toSet())
+    }
+
+    @Test fun oldMixedCaseTextBecomesCapitalsOnce() = runBlocking {
+        val id = create(1, notes = "x")
+        db.useWriterConnection { c -> c.usePrepared("UPDATE variants SET name = 'Ramraj', model = 'Rr Image', colour = 'White', notes = 'rack 4' WHERE id = $id") { it.step() } }
+        repo.upperCaseOnce()
+        val v = dao.variant(id)!!
+        assertEquals(listOf("RAMRAJ", "RR IMAGE", "WHITE", "RACK 4"), listOf(v.name, v.model, v.colour, v.notes))
+        // Runs only once: later text is left alone.
+        db.useWriterConnection { c -> c.usePrepared("UPDATE variants SET notes = 'later' WHERE id = $id") { it.step() } }
+        repo.upperCaseOnce()
+        assertEquals("later", dao.variant(id)!!.notes)
+    }
+
     @Test fun deleteRefusedWhenStockMovedSinceConfirming() = runBlocking {
         val id = create(3)
         repo.sell(newOpId(), id)
@@ -291,9 +334,9 @@ class RepositoryTest {
         val id = create(5, code = old)
         val new = ScannedCode("8901000000019", "EAN_13")
         val half = Validate.variant(VariantInput("Siyaram", "Kurta", "Festive", "Cream", "42", Sleeve.HALF)).first!!
-        assertEquals(Code.OK, repo.editItem(newOpId(), id, half, "Silk", 5, 3, listOf(new), listOf(old.key)).code)
+        assertEquals(Code.OK, repo.editItem(newOpId(), id, half, Validate.notes("Silk")!!, 5, 3, listOf(new), listOf(old.key)).code)
         val v = dao.variant(id)!!
-        assertEquals(listOf("Siyaram", "Kurta", "Festive", "Cream", "42", "Half", "Silk", 3), listOf(v.company, v.name, v.model, v.colour, v.sizeLabel, v.sleeve, v.notes, v.qty))
+        assertEquals(listOf("SIYARAM", "KURTA", "FESTIVE", "CREAM", "42", "Half", "SILK", 3), listOf(v.company, v.name, v.model, v.colour, v.sizeLabel, v.sleeve, v.notes, v.qty))
         assertEquals(Resolution.Unknown, repo.resolve(old))
         assertEquals(id, (repo.resolve(new) as Resolution.One).variant.id)
         // The quantity change is in History as a correction (tearDown also checks the ledger reconciles).
@@ -313,7 +356,7 @@ class RepositoryTest {
         repo.sell(newOpId(), b)
         assertEquals(Code.STALE, repo.editItem(newOpId(), b, changed, "", 4, 9, emptyList(), listOf(ScannedCode("B-TAG", "CODE_128").key)).code)
         val v = dao.variant(b)!!
-        assertEquals("Shirt", v.name); assertEquals(3, v.qty)
+        assertEquals("SHIRT", v.name); assertEquals(3, v.qty)
         assertEquals(b, (repo.resolve(ScannedCode("B-TAG", "CODE_128")) as Resolution.One).variant.id)
         assertEquals(a, (repo.resolve(ScannedCode("A-TAG", "CODE_128")) as Resolution.One).variant.id)
     }

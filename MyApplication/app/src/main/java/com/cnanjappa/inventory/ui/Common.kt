@@ -48,6 +48,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import java.util.Locale
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -234,6 +236,11 @@ fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modi
 }
 
 /** Selection pill: changes a choice only, never stock. Selected = tinted fill, primary border and a check. */
+/** Shop text is always in capitals: the keyboard opens in CAPS and small letters are converted as typed. */
+val CapsKeyboard = KeyboardOptions(capitalization = KeyboardCapitalization.Characters)
+
+fun caps(s: String) = s.uppercase(Locale.ROOT)
+
 @Composable
 fun ChoiceButton(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, swatch: Color? = null) {
     // Forms show dozens of these at once, so no per-chip animations: the ripple is the tap feedback.

@@ -122,7 +122,9 @@ object Validate {
         val company = text(input.company, Field.COMPANY, NAME_MAX, null)
         val colour = text(input.colour, Field.COLOUR, COLOUR_MAX, "Choose a colour")
         if (errors.isNotEmpty() || size == null) return null to errors
-        return NormalizedVariant(company, name, model, colour, size, input.sleeve!!) to emptyList()
+        // Saved in capitals however it was entered; identity keys are lower-case, so "Ramraj" = "RAMRAJ".
+        fun up(t: String) = t.uppercase(Locale.ROOT)
+        return NormalizedVariant(up(company), up(name), up(model), up(colour), size.copy(label = up(size.label)), input.sleeve!!) to emptyList()
     }
 
     /**
@@ -133,7 +135,7 @@ object Validate {
         val lines = s.replace("\r\n", "\n").split('\n')
             .map { line -> Text.clean(line.map { c -> if (c.isISOControl()) ' ' else c }.joinToString("")) }
         val out = lines.joinToString("\n").replace(Regex("\n{3,}"), "\n\n").trim()
-        return out.takeIf { it.length <= NOTES_MAX }
+        return out.uppercase(Locale.ROOT).takeIf { it.length <= NOTES_MAX }
     }
 
     /** Parses a typed quantity; rejects blank, negative, fractional and overflowing values. */
