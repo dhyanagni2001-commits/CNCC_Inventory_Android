@@ -2,6 +2,7 @@ package com.cnanjappa.inventory.data
 
 import androidx.room.immediateTransaction
 import androidx.room.useWriterConnection
+import com.cnanjappa.inventory.domain.Codes
 import com.cnanjappa.inventory.domain.InternalCode
 import com.cnanjappa.inventory.domain.MAX_QTY
 import com.cnanjappa.inventory.domain.NormalizedVariant
@@ -70,7 +71,7 @@ class InventoryRepository(val db: AppDatabase) {
     // ---------------- Lookup ----------------
 
     suspend fun resolve(code: ScannedCode): Resolution = withContext(Dispatchers.IO) {
-        dao.alias(code.key)?.let { a ->
+        Codes.lookupKeys(code.raw, code.format).firstNotNullOfOrNull { dao.alias(it) }?.let { a ->
             if (a.variantId != null) dao.variant(a.variantId)?.let { return@withContext Resolution.One(it) }
             return@withContext Resolution.Many(a.key, dao.candidates(a.key))
         }

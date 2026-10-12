@@ -28,6 +28,14 @@ object Codes {
         else -> "T:$raw"
     }
 
+    /**
+     * Keys to try when looking a scan up, exact key first. The same printed number can reach the app
+     * as a typed code (stored as a GTIN key) and later as a Code 128/39/QR scan (a text key), or the
+     * other way round, so a miss on the exact key falls back to the other readings of the same payload.
+     */
+    fun lookupKeys(raw: String, format: String): List<String> =
+        listOf(key(raw, format), key(raw, TYPED), "T:$raw").distinct()
+
     private fun isDigits(s: String, len: Int) = s.length == len && digits.matches(s)
 
     /** Expands an 8-digit UPC-E (number system 0/1 + 6 digits + check) to its 12-digit UPC-A. */

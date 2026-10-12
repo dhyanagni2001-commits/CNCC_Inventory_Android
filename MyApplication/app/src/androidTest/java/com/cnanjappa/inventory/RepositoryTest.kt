@@ -10,6 +10,7 @@ import com.cnanjappa.inventory.data.LinkResult
 import com.cnanjappa.inventory.data.MoveType
 import com.cnanjappa.inventory.data.Resolution
 import com.cnanjappa.inventory.data.newOpId
+import com.cnanjappa.inventory.domain.Codes
 import com.cnanjappa.inventory.domain.InternalCode
 import com.cnanjappa.inventory.domain.ScannedCode
 import com.cnanjappa.inventory.domain.Sleeve
@@ -162,7 +163,18 @@ class RepositoryTest {
         val id = create(1, code = ScannedCode("890123456789", "UPC_A"))
         val r = repo.resolve(ScannedCode("0890123456789", "EAN_13"))
         assertEquals(id, (r as Resolution.One).variant.id)
-        assertEquals(Resolution.Unknown, repo.resolve(ScannedCode("890123456789", "CODE_128")))
+        // Same printed digits in another symbology (e.g. a Code 128 tag for a typed number) still finds it...
+        assertEquals(id, (repo.resolve(ScannedCode("890123456789", "CODE_128")) as Resolution.One).variant.id)
+        // ...but an exact match always wins over that fallback.
+        val exact = create(1, size = "XL", code = ScannedCode("890123456789", "CODE_128"))
+        assertEquals(exact, (repo.resolve(ScannedCode("890123456789", "CODE_128")) as Resolution.One).variant.id)
+    }
+
+    @Test fun typedNumberFoundByCode128AndUpcEScans() = runBlocking {
+        val a = create(1, code = ScannedCode("8905550001014", Codes.TYPED))
+        assertEquals(a, (repo.resolve(ScannedCode("8905550001014", "CODE_128")) as Resolution.One).variant.id)
+        val b = create(1, size = "XL", code = ScannedCode("01234565", Codes.TYPED))
+        assertEquals(b, (repo.resolve(ScannedCode("01234565", "UPC_E")) as Resolution.One).variant.id)
     }
 
     @Test fun linkingNeverStealsACodeAndSharingNeedsChoice() = runBlocking {

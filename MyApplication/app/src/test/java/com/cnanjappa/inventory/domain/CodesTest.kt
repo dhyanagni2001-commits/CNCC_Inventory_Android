@@ -32,6 +32,14 @@ class CodesTest {
         assertEquals("E8:12345670", Codes.key("12345670", "EAN_8"))
     }
 
+    @Test fun lookupFallsBackToOtherReadingsOfSamePayload() {
+        // Typed 13-digit number, label printed as Code 128 with the same digits.
+        assertEquals(listOf("T:8901234567890", "G:8901234567890"), Codes.lookupKeys("8901234567890", "CODE_128"))
+        // Typed 8 digits, label is UPC-E.
+        assertEquals(listOf("G:0012345000065", "E8:01234565", "T:01234565"), Codes.lookupKeys("01234565", "UPC_E"))
+        assertEquals(listOf("T:RMJ-1"), Codes.lookupKeys("RMJ-1", "CODE_128"))
+    }
+
     @Test fun typedCodesClassifiedByLength() {
         assertEquals(Codes.key("0890123456789", "EAN_13"), Codes.key("0890123456789", Codes.TYPED))
         assertEquals(Codes.key("890123456789", "UPC_A"), Codes.key("890123456789", Codes.TYPED))
