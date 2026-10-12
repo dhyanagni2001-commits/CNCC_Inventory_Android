@@ -2,20 +2,24 @@
 
 Offline Android app for a clothing shop. Scan a garment's barcode to sell it, add products and stock, record returns, and export Excel reports, labels and backups. No internet, account or subscription needed.
 
-| Home | Sell (scanner) | Products | Stock | Product |
+| Home | Sell (scanner) | Stock | Product | Add Product |
 |---|---|---|---|---|
-| <img src="docs/screenshots/home.png" width="160"> | <img src="docs/screenshots/scan.png" width="160"> | <img src="docs/screenshots/products.png" width="160"> | <img src="docs/screenshots/stock.png" width="160"> | <img src="docs/screenshots/product.png" width="160"> |
+| <img src="docs/screenshots/home.png" width="160"> | <img src="docs/screenshots/scan.png" width="160"> | <img src="docs/screenshots/stock.png" width="160"> | <img src="docs/screenshots/product.png" width="160"> | <img src="docs/screenshots/add.png" width="160"> |
 
-Screenshots are from the emulator with demo data. The scanner shows the emulator's virtual room in place of a real camera.
+Screenshots are from the emulator with stress-test data. The scanner shows the emulator's virtual room in place of a real camera.
 
 ## Features
 
-- **Sell by scanning:** each scan sells exactly 1 piece, with Undo.
-- **Uses existing barcodes:** EAN, UPC, Code 128/39, QR and Data Matrix. No printing needed.
+- **Home:** just Sell, Return and Add Product. Everything else is in the Stock tab.
+- **Sell by scanning:** each scan sells exactly 1 piece, with Undo. A label held in front of the camera never sells twice.
+- **Uses existing barcodes:** EAN, UPC, Code 128/39, QR and Data Matrix. A number typed in matches the same number scanned in any of these formats.
+- **One barcode, one item:** a barcode already on an item is refused when you scan or type it for another one.
+- **Generate a barcode:** for tags without one. Makes a new EAN-13 in the in-store range (starts with 2, never on manufacturer goods), never the same number twice. Labels print it as EAN-13.
 - **Returns:** only against a recorded sale, including damaged returns.
-- **Products:** company, name, model, colour, size and Full/Half sleeve, with optional notes.
-- **Stock:** add stock, or correct it with a reason. Search all stock, with a size breakdown.
-- **Exports:** Excel stock report, barcode label PDF, and checked backup and restore.
+- **Products:** company name, product name, size, Full/Half and colour are required, plus a barcode. Comments and notes are optional. Company and product are picked from a dropdown of saved names, or added new. All text is saved in capitals.
+- **Stock tab:** Excel report at the top, then one row per item (size · Full/Half · colour · pieces). Tap a row to open it, ✎ to edit every field, including quantity (saved in History as a correction) and barcodes.
+- **Delete item:** removes it from stock, search and scanning, and frees its barcodes and name. Past sales stay in History and Excel.
+- **Exports:** Excel stock report, barcode label PDF (from the product page), and checked backup and restore.
 - **Automatic backup:** every night around 11 PM, if anything changed, to `Download/CNCC Backups` on the phone (visible in the Files app, kept if the app is uninstalled). The last 14 are kept. Copy one off the phone now and then.
 
 ## How it works
@@ -60,6 +64,16 @@ adb shell cmd package compile -m speed-profile -f com.cnanjappa.inventory   # op
 
 An APK installed over USB, or from a file, runs unoptimised until Android compiles it in the background (when the phone is idle and charging, usually overnight). Until then screens open noticeably slower. The `compile` line does it straight away; run it after every install.
 
+### Keeping it smooth on the shop phone
+
+Measured on a Galaxy M32: the uncompiled app took up to 250 ms per frame when opening Add Product; compiled, about 20 ms. The phone itself was also overloaded (load about 4× its 8 cores, 1.4 GB swap) by other apps.
+
+1. Run the `compile` line after every install (or leave the phone idle and charging overnight).
+2. Use the phone for the shop only: uninstall or disable heavy apps (social media, games), and close recent apps.
+3. Settings → Battery → turn **Power saving off** while the shop is open (it slows the CPU, and the scanner reads less often).
+4. Settings → Apps → CN Cloth Center → Battery → **Unrestricted**.
+5. Keep at least 15% storage free, and restart the phone once a day.
+
 The release APK (`./gradlew :app:assembleRelease`) must be signed with the shop's own key. This repository contains no keys.
 
 Each release build copies its APK and R8 mapping file to `MyApplication/release-artifacts/<version>/`. Keep that folder for every version you hand out: crash reports from that version can only be read with its mapping file. The installed version is shown at the bottom of the app's menu (⋮).
@@ -77,11 +91,11 @@ Some bugs only appear after R8 shrinks the app, and the normal tests run on the 
 ## Tests
 
 ```bash
-./gradlew :app:testDebugUnitTest          # 26 unit tests, no device needed
-./gradlew :app:connectedDebugAndroidTest  # 31 device tests, needs an emulator or phone
+./gradlew :app:testDebugUnitTest          # 29 unit tests, no device needed
+./gradlew :app:connectedDebugAndroidTest  # 46 device tests, needs an emulator or phone
 ```
 
-All 57 tests pass on the emulator (API 37); the opt-in demo and stress tests skip themselves. The tests run in a separate `.debug` app, so they never touch real shop data.
+All 73 tests pass on the emulator (API 37, 12 Oct 2026); the 2 opt-in demo and stress tests skip themselves. `ScanSellE2ETest` draws real labels (all 8 formats), reads them with the app's scanner and sells them. The tests run in a separate `.debug` app, so they never touch real shop data.
 
 ### Stress test (10,000 products)
 
@@ -112,7 +126,17 @@ Results on the emulator (API 37, 8 Oct 2026). Times are typical / 95th percentil
 
 To test the optimised build with stress data, restore `/sdcard/Android/data/com.cnanjappa.inventory.debug/files/stress.cncbak` in the app (Menu → Backup → Restore backup), then run `SKIP_DB=1 PKG=com.cnanjappa.inventory scripts/stress.sh 180`.
 
-**Not yet verified:** battery, heat and smoothness on a real phone, scanning real garment labels, and printing. The app and scanner do run on a Samsung Galaxy M32 (Android 13).
+### Continuous use (12 Oct 2026, emulator, 10,000 products)
+
+30 rounds of real use (Add Product, Stock list and search, product page, Sell camera; about 10 minutes), then 3,000 random taps and swipes:
+
+| | Real use | Random taps |
+|---|---|---|
+| Frames on time | 93%, slowest 1% at 20 ms | 86%, slowest 1% at 34 ms |
+| Hangs (ANR) / crashes | 0 / 0 | 0 / 0 |
+| Memory | 29 → 34 MB | 52 MB, steady (app data 7 MB; the rest is the scanner model and camera, loaded once) |
+
+**Not yet verified:** battery and heat on a real phone, scanning a wide range of real garment labels, and printing. On the shop phone, run the `compile` command after installing, and keep few other apps running (see "Build and run"). The app and scanner do run on a Samsung Galaxy M32 (Android 13).
 
 ## Project layout
 
