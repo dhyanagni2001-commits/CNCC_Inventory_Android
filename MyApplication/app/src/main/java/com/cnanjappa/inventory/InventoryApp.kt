@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import com.cnanjappa.inventory.data.AppDatabase
 import com.cnanjappa.inventory.data.InventoryRepository
+import com.cnanjappa.inventory.domain.ShopProfile
 import com.cnanjappa.inventory.export.AutoBackup
 import com.cnanjappa.inventory.export.Backup
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,15 @@ class Container(val appContext: Context) {
     private val _launch = MutableStateFlow(LaunchState.OPENING)
     val launch: StateFlow<LaunchState> = _launch
 
+    /** Saved shop name/owner; null means first launch, so Shop setup is shown before Home. */
+    private val _shop = MutableStateFlow<ShopProfile?>(null)
+    val shop: StateFlow<ShopProfile?> = _shop
+
+    suspend fun saveShop(p: ShopProfile) {
+        repo.saveShopProfile(p)
+        _shop.value = p
+    }
+
     /** Branding is shown once per process (cold launch), never on resume or rotation. */
     var brandingShown = false
 
@@ -53,6 +63,7 @@ class Container(val appContext: Context) {
                 repo.finishOldArchives()
                 repo.upperCaseOnce()
                 repo.resizeOnce()
+                _shop.value = repo.shopProfile()
                 repo.dao.variantCount()
                 LaunchState.READY
             } catch (e: Exception) {

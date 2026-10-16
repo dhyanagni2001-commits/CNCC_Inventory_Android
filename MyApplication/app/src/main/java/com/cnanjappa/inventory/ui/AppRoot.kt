@@ -42,6 +42,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -80,7 +82,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.cnanjappa.inventory.LaunchState
 import com.cnanjappa.inventory.container
-import com.cnanjappa.inventory.domain.SHOP_NAME
 import kotlinx.coroutines.delay
 
 /**
@@ -107,6 +108,7 @@ object Routes {
     const val LABELS = "labels/{id}?count={count}"
     const val HISTORY = "history"
     const val BACKUP = "backup"
+    const val SHOP = "shop"
 
     fun products(pickRaw: String? = null, pickFmt: String? = null) =
         "products" + if (pickRaw != null) "?pickRaw=${Uri.encode(pickRaw)}&pickFmt=$pickFmt" else ""
@@ -136,6 +138,7 @@ object Routes {
 fun AppRoot() {
     val container = LocalContext.current.container
     val launch by container.launch.collectAsStateWithLifecycle()
+    val shop by container.shop.collectAsStateWithLifecycle()
     var brandDone by rememberSaveable { mutableStateOf(container.brandingShown) }
     var slow by remember { mutableStateOf(false) }
     LaunchedEffect(launch) {
@@ -143,10 +146,14 @@ fun AppRoot() {
         if (launch == LaunchState.OPENING) { delay(1500); slow = true }
     }
     Crossfade(targetState = brandDone && launch == LaunchState.READY, animationSpec = tween(220), label = "launch") { ready ->
-        if (ready) MainNav()
-        else Brand(launch, slow, animate = !brandDone, onRetry = { container.warmUp() }) {
-            brandDone = true
-            container.brandingShown = true
+        when {
+            // First launch: ask for the shop once; saving it switches straight to Home.
+            ready && shop == null -> ShopSetupScreen()
+            ready -> MainNav(shop!!.name)
+            else -> Brand(launch, shop?.name, slow, animate = !brandDone, onRetry = { container.warmUp() }) {
+                brandDone = true
+                container.brandingShown = true
+            }
         }
     }
 }
@@ -155,7 +162,7 @@ fun AppRoot() {
 const val BRAND_MS = 700L
 
 @Composable
-internal fun Brand(state: LaunchState, slow: Boolean, animate: Boolean, onRetry: () -> Unit, onShown: () -> Unit) {
+internal fun Brand(state: LaunchState, shopName: String?, slow: Boolean, animate: Boolean, onRetry: () -> Unit, onShown: () -> Unit) {
     val start = if (animate) 0f else 1f
     val mark = remember { Animatable(start) }
     val lines = remember { List(3) { Animatable(start) } }
@@ -191,12 +198,14 @@ internal fun Brand(state: LaunchState, slow: Boolean, animate: Boolean, onRetry:
                     .background(Brush.linearGradient(listOf(BrandBlueLight, BrandBlue)), RoundedCornerShape(22.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("CN", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+                Text(initials(shopName), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
             }
             Spacer(Modifier.height(28.dp))
             val headline = MaterialTheme.typography.headlineLarge.copy(fontSize = 34.sp, lineHeight = 40.sp, textAlign = TextAlign.Center)
-            Text("C Nanjappa", Modifier.rise(lines[0]), style = headline, color = MaterialTheme.colorScheme.onBackground)
-            Text("Cloth Center", Modifier.rise(lines[1]), style = headline, color = primary)
+            // The saved shop name (blank only before the first-launch setup), split over two lines.
+            val (first, second) = splitName(shopName)
+            Text(first, Modifier.rise(lines[0]), style = headline, color = MaterialTheme.colorScheme.onBackground)
+            if (second.isNotEmpty()) Text(second, Modifier.rise(lines[1]), style = headline, color = primary)
             Spacer(Modifier.height(14.dp))
             Box(
                 Modifier.width(56.dp).height(3.dp).drawBehind {
@@ -220,12 +229,27 @@ internal fun Brand(state: LaunchState, slow: Boolean, animate: Boolean, onRetry:
     }
 }
 
+/** Up to two initials for the opening badge, e.g. "C Nanjappa Cloth Center" → "CN". */
+internal fun initials(name: String?): String =
+    name?.split(' ')?.filter { it.firstOrNull()?.isLetterOrDigit() == true }?.take(2)?.joinToString("") { it.take(1).uppercase() }
+        ?.ifEmpty { null } ?: "IN"
+
+/** Last two words go on the coloured second line ("C Nanjappa" / "Cloth Center"); one or two words stay on one. */
+internal fun splitName(name: String?): Pair<String, String> {
+    val words = name?.trim()?.split(Regex("\\s+"))?.filter { it.isNotEmpty() }.orEmpty()
+    return when {
+        words.isEmpty() -> "Inventory" to ""
+        words.size <= 2 -> words.joinToString(" ") to ""
+        else -> words.dropLast(2).joinToString(" ") to words.takeLast(2).joinToString(" ")
+    }
+}
+
 private val BrandBlue = Color(0xFF1E3A8A)
 private val BrandBlueLight = Color(0xFF2563EB)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainNav() {
+fun MainNav(shopName: String) {
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route?.substringBefore('?')
@@ -236,7 +260,7 @@ fun MainNav() {
         topBar = {
             if (onTab) TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                title = { Text(SHOP_NAME, maxLines = 1, style = MaterialTheme.typography.titleLarge) },
+                title = { Text(shopName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge) },
                 actions = {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Menu") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -244,6 +268,8 @@ fun MainNav() {
                             onClick = { menu = false; nav.navigate(Routes.HISTORY) })
                         DropdownMenuItem(text = { Text("Backup", fontSize = 17.sp) }, leadingIcon = { Icon(Icons.Default.Backup, null) },
                             onClick = { menu = false; nav.navigate(Routes.BACKUP) })
+                        DropdownMenuItem(text = { Text("Shop details", fontSize = 17.sp) }, leadingIcon = { Icon(Icons.Default.Storefront, null) },
+                            onClick = { menu = false; nav.navigate(Routes.SHOP) })
                         // Lets staff tell support exactly which build is installed.
                         DropdownMenuItem(text = { Text(appVersion(), fontSize = 14.sp) }, onClick = {}, enabled = false)
                     }
@@ -304,6 +330,7 @@ private fun NavGraph(nav: NavHostController, pad: PaddingValues) {
         composable(Routes.LABELS, arguments = listOf(navArgument("id") { type = NavType.LongType }, navArgument("count") { type = NavType.IntType; defaultValue = 1 })) { LabelsScreen(nav) }
         composable(Routes.HISTORY) { HistoryScreen(nav) }
         composable(Routes.BACKUP) { BackupScreen(nav) }
+        composable(Routes.SHOP) { ShopDetailsScreen(nav) }
     }
 }
 

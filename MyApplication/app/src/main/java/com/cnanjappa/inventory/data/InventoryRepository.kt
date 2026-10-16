@@ -7,6 +7,7 @@ import com.cnanjappa.inventory.domain.InternalCode
 import com.cnanjappa.inventory.domain.MAX_QTY
 import com.cnanjappa.inventory.domain.NormalizedVariant
 import com.cnanjappa.inventory.domain.ScannedCode
+import com.cnanjappa.inventory.domain.ShopProfile
 import com.cnanjappa.inventory.domain.Sizes
 import com.cnanjappa.inventory.domain.Sleeve
 import com.cnanjappa.inventory.domain.StoreBarcode
@@ -420,6 +421,19 @@ class InventoryRepository(val db: AppDatabase) {
         }
     }
 
+    /** Null until the one-time Shop setup has been saved. */
+    suspend fun shopProfile(): ShopProfile? = withContext(Dispatchers.IO) {
+        val name = dao.setting(KEY_SHOP_NAME) ?: return@withContext null
+        ShopProfile(name, dao.setting(KEY_OWNER_NAME).orEmpty())
+    }
+
+    suspend fun saveShopProfile(p: ShopProfile) = withContext(NonCancellable + Dispatchers.IO) {
+        tx {
+            dao.putSetting(Setting(KEY_SHOP_NAME, p.name))
+            dao.putSetting(Setting(KEY_OWNER_NAME, p.owner))
+        }
+    }
+
     suspend fun setSetting(key: String, value: String) = withContext(Dispatchers.IO) { dao.putSetting(Setting(key, value)) }
 
     companion object {
@@ -431,6 +445,8 @@ class InventoryRepository(val db: AppDatabase) {
         const val KEY_STORE_SHOP = "storeBarcodeShop"
         const val KEY_CAPS = "textInCapitals"
         const val KEY_SIZES = "sizeKeysV2"
+        const val KEY_SHOP_NAME = "shopName"
+        const val KEY_OWNER_NAME = "ownerName"
         const val KEY_STORE_SERIAL = "storeBarcodeSerial"
         private const val EAN_13 = "EAN_13"
         fun now() = System.currentTimeMillis()

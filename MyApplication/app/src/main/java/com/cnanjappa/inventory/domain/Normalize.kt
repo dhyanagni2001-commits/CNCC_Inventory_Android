@@ -2,7 +2,10 @@ package com.cnanjappa.inventory.domain
 
 import java.util.Locale
 
-const val SHOP_NAME = "C Nanjappa Cloth Center"
+/** Shop name and owner, entered once on first launch (Shop setup); shown in the header, opening and Excel. */
+data class ShopProfile(val name: String, val owner: String)
+
+const val SHOP_TEXT_MAX = 60
 
 const val NAME_MAX = 100
 const val SIZE_MAX = 30

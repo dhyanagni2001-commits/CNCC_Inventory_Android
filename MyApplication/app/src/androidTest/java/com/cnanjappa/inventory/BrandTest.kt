@@ -20,7 +20,7 @@ class BrandTest {
     @Test fun showsShopNameAndFinishesOnTime() {
         var shown = false
         rule.mainClock.autoAdvance = false
-        rule.setContent { AppTheme { Brand(LaunchState.READY, slow = false, animate = true, onRetry = {}) { shown = true } } }
+        rule.setContent { AppTheme { Brand(LaunchState.READY, "C Nanjappa Cloth Center", slow = false, animate = true, onRetry = {}) { shown = true } } }
         rule.onNodeWithText("C Nanjappa").assertExists()
         rule.onNodeWithText("Cloth Center").assertExists()
         rule.mainClock.advanceTimeBy(BRAND_MS / 2)
@@ -33,7 +33,7 @@ class BrandTest {
     @Test fun replayDoesNotAnimate() {
         var shown = false
         rule.mainClock.autoAdvance = false
-        rule.setContent { AppTheme { Brand(LaunchState.READY, slow = false, animate = false, onRetry = {}) { shown = true } } }
+        rule.setContent { AppTheme { Brand(LaunchState.READY, "C Nanjappa Cloth Center", slow = false, animate = false, onRetry = {}) { shown = true } } }
         rule.mainClock.advanceTimeByFrame()
         rule.waitForIdle()
         assertTrue(shown)

@@ -5,9 +5,9 @@ import androidx.room.deferredTransaction
 import androidx.room.useReaderConnection
 import androidx.sqlite.SQLiteStatement
 import com.cnanjappa.inventory.data.AppDatabase
+import com.cnanjappa.inventory.data.InventoryRepository
 import com.cnanjappa.inventory.data.MoveType
 import com.cnanjappa.inventory.domain.Codes
-import com.cnanjappa.inventory.domain.SHOP_NAME
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -106,9 +106,14 @@ class ExcelReport(private val db: AppDatabase) {
         }
         fun pieces(t: String) = byType[t]?.get(0) ?: 0L
         val adjust = byType[MoveType.ADJUST]?.get(1) ?: 0L
+        // Same snapshot as the rest of the workbook.
+        suspend fun setting(key: String) = usePrepared("SELECT value FROM settings WHERE `key` = ?") { s -> s.bindText(1, key); if (s.step()) s.getText(0) else "" }
+        val shop = setting(InventoryRepository.KEY_SHOP_NAME)
+        val owner = setting(InventoryRepository.KEY_OWNER_NAME)
         x.sheet("Summary", listOf(38, 30)) {
             header("Item", "Value")
-            row("Shop", SHOP_NAME)
+            row("Shop", shop)
+            row("Owner", owner)
             row("As of", DateCell(asOf))
             row("Timezone", zone.id)
             row("Products (company/product/model/colour)", counts[0])

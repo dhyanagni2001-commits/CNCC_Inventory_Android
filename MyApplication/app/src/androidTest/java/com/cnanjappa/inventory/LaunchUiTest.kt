@@ -21,7 +21,8 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class LaunchUiTest {
-    @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+    @get:Rule(order = 0) val shop = ShopRule(ShopRule.TEST_SHOP)
+    @get:Rule(order = 1) val rule = createAndroidComposeRule<MainActivity>()
 
     @Test fun openingShowsShopNameThenHomeWithinBudget() {
         val start = System.currentTimeMillis()

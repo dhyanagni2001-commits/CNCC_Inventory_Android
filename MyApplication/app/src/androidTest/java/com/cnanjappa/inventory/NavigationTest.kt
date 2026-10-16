@@ -19,7 +19,8 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class NavigationTest {
-    @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+    @get:Rule(order = 0) val shop = ShopRule(ShopRule.TEST_SHOP)
+    @get:Rule(order = 1) val rule = createAndroidComposeRule<MainActivity>()
 
     @Before fun grantCamera() {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext

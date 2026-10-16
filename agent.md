@@ -12,7 +12,7 @@ Follow the user's latest explicit instructions. For older passages or mockups th
 
 | Topic | Implement this behaviour |
 |---|---|
-| Shop name | C Nanjappa Cloth Center, shown briefly on cold launch before Home |
+| Shop name | Entered once on first launch (**Set up your shop**: shop name + owner name, stored locally, no online account); shown in the header, the brief cold-launch opening and Excel. Never asked again; editable via ⋮ → Shop details |
 | Default product save | **Save product**, with existing manufacturer codes; no automatic PDF/printing |
 | New labels | Optional Code 128/QR label generation and PDF export; no printer purchase required |
 | Home Stock overview / Inventory Analytics | Generate and save the complete **.xlsx workbook** |
