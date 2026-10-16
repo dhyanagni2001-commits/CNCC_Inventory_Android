@@ -7,6 +7,8 @@ import com.cnanjappa.inventory.domain.InternalCode
 import com.cnanjappa.inventory.domain.MAX_QTY
 import com.cnanjappa.inventory.domain.NormalizedVariant
 import com.cnanjappa.inventory.domain.ScannedCode
+import com.cnanjappa.inventory.domain.Sizes
+import com.cnanjappa.inventory.domain.Sleeve
 import com.cnanjappa.inventory.domain.StoreBarcode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -380,6 +382,30 @@ class InventoryRepository(val db: AppDatabase) {
     }
 
     /**
+     * Once: sizes saved before waist sizes existed (e.g. "M/24-38" kept as free text, or "24-38" read
+     * as an age) get the key the size picker now uses, so picking them again finds the same item
+     * instead of creating a duplicate. An item whose new identity is already taken is left as it was.
+     * Stock and history are untouched.
+     */
+    suspend fun resizeOnce() = withContext(NonCancellable + Dispatchers.IO) {
+        tx {
+            if (dao.setting(KEY_SIZES) != null) return@tx
+            for (v in dao.rangeOrCustomSizes()) {
+                val size = Sizes.canonical(v.sizeLabel) ?: continue
+                if (size.key == v.sizeKey) continue
+                val sleeve = Sleeve.entries.firstOrNull { it.label == v.sleeve } ?: continue
+                val nv = NormalizedVariant(v.company, v.name, v.model, v.colour, size.copy(label = size.label.uppercase(java.util.Locale.ROOT)), sleeve)
+                if (dao.variantByIdentity(nv.identityKey) != null) continue
+                dao.updateDetails(
+                    v.id, v.company, v.name, v.model, v.colour, nv.size.label, nv.size.key, nv.size.sort,
+                    v.sleeve, nv.identityKey, nv.groupKey, searchText(nv, v.notes), v.notes,
+                )
+            }
+            dao.putSetting(Setting(KEY_SIZES, "1"))
+        }
+    }
+
+    /**
      * Items hidden by the old Archive button now count as deleted. Run once at start: frees their
      * barcodes and identity, and writes off pieces left as a "Deleted" correction (ledger stays right).
      */
@@ -404,6 +430,7 @@ class InventoryRepository(val db: AppDatabase) {
         const val KEY_LABEL_PRESET = "labelPreset"
         const val KEY_STORE_SHOP = "storeBarcodeShop"
         const val KEY_CAPS = "textInCapitals"
+        const val KEY_SIZES = "sizeKeysV2"
         const val KEY_STORE_SERIAL = "storeBarcodeSerial"
         private const val EAN_13 = "EAN_13"
         fun now() = System.currentTimeMillis()

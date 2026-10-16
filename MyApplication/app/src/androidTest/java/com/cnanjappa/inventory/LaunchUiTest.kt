@@ -32,8 +32,10 @@ class LaunchUiTest {
     }
 
     @Test fun addProductHasOptionalNotes() {
-        rule.waitUntil(LAUNCH_BUDGET_MS) { rule.onAllNodes(hasText("Add Product")).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Add Product").performClick()
+        rule.waitUntil(LAUNCH_BUDGET_MS) { rule.onAllNodes(hasText("Stock")).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Stock").performClick()
+        rule.waitUntil(LAUNCH_BUDGET_MS) { rule.onAllNodes(hasText("Add product")).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Add product").performClick()
         // The form builds sections as they scroll into view, so scroll the list to the Notes box.
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasTestTag("notes"))
         rule.onNodeWithTag("notes").assertIsDisplayed()

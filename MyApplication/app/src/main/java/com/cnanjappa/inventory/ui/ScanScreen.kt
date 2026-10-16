@@ -90,7 +90,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 enum class ScanMode(val heading: String, val instruction: String) {
     SELL("Selling item", "Scanning here sells 1 piece."),
     RETURN("Returning item", "Scan the item. Stock does not change until you tap Return."),
-    RESTOCK("Add stock — scan item", "Scan an item's label. Stock does not change until you tap Add stock."),
+    RESTOCK("Add stock — scan item", "Scan the item's label. Then choose how many pieces arrived."),
     CAPTURE("Scan existing barcode", "Scan the barcode on the garment's tag."),
     LINK("Link more labels", "Scan each new label for this item. Stock does not change."),
 }
@@ -108,7 +108,7 @@ sealed interface ScanState {
 }
 
 sealed interface ScanNav {
-    data class ToVariant(val id: Long) : ScanNav
+    data class ToVariant(val id: Long, val restock: Boolean = false) : ScanNav
     data class ToReturn(val id: Long) : ScanNav
     data class Captured(val code: ScannedCode) : ScanNav
 }
@@ -257,6 +257,7 @@ class ScanViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         when (mode) {
             ScanMode.SELL -> sell(v)
             ScanMode.RETURN -> navEvent = ScanNav.ToReturn(v.id)
+            ScanMode.RESTOCK -> navEvent = ScanNav.ToVariant(v.id, restock = true)
             else -> navEvent = ScanNav.ToVariant(v.id)
         }
     }
@@ -382,7 +383,7 @@ fun ScanScreen(nav: NavHostController) {
                 nav.popBackStack()
             }
             is ScanNav.ToReturn -> nav.navigate(Routes.returnItem(e.id)) { popUpTo(Routes.SCAN) { inclusive = true } }
-            is ScanNav.ToVariant -> nav.navigate(Routes.variant(e.id)) { popUpTo(Routes.SCAN) { inclusive = true } }
+            is ScanNav.ToVariant -> nav.navigate(if (e.restock) Routes.restockItem(e.id) else Routes.variant(e.id)) { popUpTo(Routes.SCAN) { inclusive = true } }
         }
         vm.navEvent = null
     }
@@ -432,7 +433,7 @@ fun ScanScreen(nav: NavHostController) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 VariantHeader(v)
                                 BigButton(
-                                    when (vm.mode) { ScanMode.SELL -> "Sell 1"; ScanMode.RETURN -> "Return this item"; else -> "Choose this item" },
+                                    when (vm.mode) { ScanMode.SELL -> "Sell 1"; ScanMode.RETURN -> "Return this item"; ScanMode.RESTOCK -> "Add stock to this item"; else -> "Choose this item" },
                                     { vm.chosen(v) }, enabled = !vm.busy,
                                 )
                             }

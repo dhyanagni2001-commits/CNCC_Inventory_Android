@@ -176,6 +176,32 @@ class RepositoryTest {
         assertEquals("later", dao.variant(id)!!.notes)
     }
 
+    @Test fun oldDhotiSizesGetWaistKeysOnceWithoutDuplicates() = runBlocking {
+        val typed = create(5, size = "Free")
+        val clash = create(2, size = "Plain")
+        // As saved before waist sizes existed: free text, and a range read as an age.
+        suspend fun old(id: Long, label: String, key: String) = db.useWriterConnection { c ->
+            c.usePrepared("UPDATE variants SET sizeLabel = '$label', sizeKey = '$key', identityKey = groupKey || char(31) || '$key' || char(31) || 'FULL' WHERE id = $id") { it.step() }
+        }
+        old(typed, "M/24-38", "C:m/24-38")
+        old(clash, "24-38", "A:24-38")
+        repo.resizeOnce()
+        val v = dao.variant(typed)!!
+        assertEquals(listOf("W:24-38", "M/24–38", nv(size = "M/24-38").identityKey), listOf(v.sizeKey, v.sizeLabel, v.identityKey))
+        assertEquals(5, v.qty)
+        // The second item would now be the same size: it is left alone rather than merged.
+        assertEquals("A:24-38", dao.variant(clash)!!.sizeKey)
+        // Picking the size again finds the existing item instead of creating a duplicate.
+        assertEquals(Code.DUPLICATE, repo.createVariant(newOpId(), nv(size = "24-38"), 1, null, false, "").code)
+    }
+
+    @Test fun restockOneAtATimeAndUndoLastKeepsLedger() = runBlocking {
+        val id = create(2)
+        repeat(3) { assertEquals(Code.OK, repo.restock(newOpId(), id, 1).code) }
+        assertEquals(5, qty(id))
+        assertEquals(4, repo.correct(newOpId(), id, 5, 4, "Undo add stock").remaining)
+    }
+
     @Test fun deleteRefusedWhenStockMovedSinceConfirming() = runBlocking {
         val id = create(3)
         repo.sell(newOpId(), id)

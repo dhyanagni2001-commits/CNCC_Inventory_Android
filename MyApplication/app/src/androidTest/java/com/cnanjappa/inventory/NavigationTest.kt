@@ -14,7 +14,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Home holds only Sell, Return and Add Product; stock and the Excel report live in the Stock tab.
+ * Home holds only Sell and Return; stock, Add product and the Excel report live in the Stock tab.
  * "Find product" from the scanner is a sub-screen that Back leaves. Nothing is saved.
  */
 @RunWith(AndroidJUnit4::class)
@@ -28,10 +28,10 @@ class NavigationTest {
 
     private fun waitFor(text: String) = rule.waitUntil(LAUNCH_MS) { rule.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
 
-    @Test fun homeShowsOnlyTheThreeActions() {
+    @Test fun homeShowsOnlySellAndReturn() {
         waitFor("Sell")
-        rule.onNodeWithText("Return").assertExists()
-        rule.onNodeWithText("Add Product").assertExists()
+        rule.onNodeWithText("Return an item").assertExists()
+        rule.onNodeWithText("Add Product", ignoreCase = true).assertDoesNotExist()
         rule.onNodeWithText("Excel report").assertDoesNotExist()
         rule.onNodeWithText("Products").assertDoesNotExist()
     }
@@ -41,6 +41,7 @@ class NavigationTest {
         rule.onNodeWithText("Stock").performClick()
         waitFor("Excel report")
         rule.onNodeWithText("Scan to add stock").assertExists()
+        rule.onNodeWithText("Add product").assertExists()
         rule.onNodeWithText("Home").performClick()
         rule.waitForIdle()
         rule.onNodeWithText("Scan a label to sell 1 piece").assertExists()

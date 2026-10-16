@@ -52,6 +52,7 @@ class Container(val appContext: Context) {
                 repo.catalog()
                 repo.finishOldArchives()
                 repo.upperCaseOnce()
+                repo.resizeOnce()
                 repo.dao.variantCount()
                 LaunchState.READY
             } catch (e: Exception) {

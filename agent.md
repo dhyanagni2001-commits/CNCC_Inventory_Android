@@ -20,7 +20,8 @@ Follow the user's latest explicit instructions. For older passages or mockups th
 | Low-stock / out-of-stock widgets | None: no cards, badges, thresholds, or dedicated filters; show ordinary zero counts |
 | Sleeves | Required **Full** or **Half**, with no silent default and no Not applicable |
 | Colours | **White**, then **Cream**, first; other saved colours and **+ More** for custom entry |
-| Sizes | S, M, L, XL, XXL, XXXL; every integer 36–50; saved/custom sizes such as 32 |
+| Sizes | Tabs **Letter / Number / Age / Waist** (one system at a time, chosen size always shown): S–XXXL; every integer 36–50; age ranges 0–1 to 18–20 years; waist ranges for dhotis such as M/24–38 and L/40–46 (keyed by range, never the letter M); saved/custom sizes such as 32 |
+| Restock scan | A scan never changes stock by itself (it reads too fast to count pieces): it opens that item with **Add stock** first, current stock shown, a Pieces received stepper and one Add stock tap, then **Scan next item** |
 | Companies | Any company, including Ramraj, Udyam and Puma; no hardcoded brand logic |
 | Barcode collisions | Explicit ambiguity and variant choice; never overwrite or choose the first match |
 | Offline | Everything core works from first launch, without accounts, internet or scanner downloads |

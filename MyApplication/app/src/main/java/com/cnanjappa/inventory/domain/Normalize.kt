@@ -13,8 +13,14 @@ const val MAX_QTY = 1_000_000
 
 enum class Sleeve(val label: String) { FULL("Full"), HALF("Half") }
 
-/** Size type order also drives on-screen sort: letters, numbers, ages, then custom. */
-enum class SizeType { LETTER, NUMBER, AGE, CUSTOM }
+/** Size type order also drives on-screen sort: letters, numbers, ages, waist, then custom. */
+enum class SizeType(val tab: String, val caption: String) {
+    LETTER("Letter", "Letter sizes"),
+    NUMBER("Number", "Number sizes"),
+    AGE("Age", "Age sizes (years) — for kids"),
+    WAIST("Waist", "Waist sizes (inches) — dhoti, velcro dhoti, pants"),
+    CUSTOM("Other", "Other saved sizes"),
+}
 
 data class CanonicalSize(val type: SizeType, val label: String, val key: String, val sort: Int)
 
@@ -23,6 +29,14 @@ object Sizes {
     val LETTER_HINTS = mapOf("L" to "Large", "XXL" to "Double XL", "XXXL" to "Triple XL")
     val NUMBERS = (36..50).map { it.toString() }
     val AGES = (0..17).map { "$it–${it + 1}" } + "18–20"
+    /** Waist ranges as printed on readymade/velcro dhoti tags (e.g. Ramraj M/24-38, L/40-46). */
+    val WAISTS = listOf("M/24–38", "L/40–46")
+
+    /** The one-tap choices shown under each size tab; CUSTOM has only the shop's saved sizes. */
+    val STANDARD = mapOf(
+        SizeType.LETTER to LETTERS, SizeType.NUMBER to NUMBERS, SizeType.AGE to AGES,
+        SizeType.WAIST to WAISTS, SizeType.CUSTOM to emptyList(),
+    )
 
     private val letterAliases = mapOf(
         "s" to "S", "small" to "S",
@@ -33,11 +47,14 @@ object Sizes {
         "xxxl" to "XXXL", "3xl" to "XXXL", "triple xl" to "XXXL",
     )
     private val ageRegex = Regex("""^(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*(y|yr|yrs|year|years)?$""")
+    private val waistRegex = Regex("""^(?:(s|m|l|xl|xxl|xxxl|2xl|3xl)\s*[/(]?\s*)?(\d{2})\s*[-–—]\s*(\d{2})\s*\)?\s*(?:in|inch|inches|")?$""")
     private val numberRegex = Regex("""^\d{1,3}$""")
 
     /**
      * Canonicalises a typed or tapped size. Aliases (L/Large, 2XL/XXL...) collapse, but sizes of
      * different types never convert into each other: numeric 40 is never L, and 2–3 years is never 2.
+     * A range is an age up to 18–20; a range from 20 inches up is a waist, keyed by the range alone so
+     * "M/24-38" and "24-38" are the same size, but never the letter M.
      */
     fun canonical(input: String): CanonicalSize? {
         val clean = Text.clean(input)
@@ -47,7 +64,16 @@ object Sizes {
         ageRegex.matchEntire(lower)?.let { m ->
             val a = m.groupValues[1].toInt()
             val b = m.groupValues[2].toInt()
-            return CanonicalSize(SizeType.AGE, "$a–$b years", "A:$a-$b", 20_000 + a * 100 + b)
+            if (a < b && b <= 20) return CanonicalSize(SizeType.AGE, "$a–$b years", "A:$a-$b", 20_000 + a * 100 + b)
+        }
+        waistRegex.matchEntire(lower)?.let { m ->
+            val a = m.groupValues[2].toInt()
+            val b = m.groupValues[3].toInt()
+            if (a in 20..60 && a < b) {
+                val letter = m.groupValues[1].takeIf { it.isNotEmpty() }?.let { letterAliases[it] }
+                val label = (letter?.let { "$it/" } ?: "") + "$a–$b"
+                return CanonicalSize(SizeType.WAIST, label, "W:$a-$b", 25_000 + (a - 20) * 100 + b)
+            }
         }
         if (numberRegex.matches(lower)) {
             val n = lower.toInt()
@@ -56,8 +82,10 @@ object Sizes {
         return CanonicalSize(SizeType.CUSTOM, clean, "C:$lower", 30_000)
     }
 
-    fun searchTerms(size: CanonicalSize): String =
-        size.label + " " + (LETTER_HINTS[size.label] ?: "")
+    fun searchTerms(size: CanonicalSize): String = when (size.type) {
+        SizeType.WAIST -> size.label + " waist"
+        else -> size.label + " " + (LETTER_HINTS[size.label] ?: "")
+    }
 }
 
 object Text {

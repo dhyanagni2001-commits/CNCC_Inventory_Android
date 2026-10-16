@@ -66,10 +66,12 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
     private val fromScan = handle.get<String>("linkRaw") != null
     var backToScanner by mutableStateOf(false)
         private set
+    /** Opened from "Scan to add stock": Add stock comes first, then Scan next item. */
+    val restockMode = handle.get<Boolean>("restock") == true
 
     init {
         recover(KEY_SELL) { r -> msg = Msg(Tone.SUCCESS, "1 item reduced — ${piecesLeft(r.remaining!!)}"); lastSaleId = r.refId }
-        recover(KEY_RESTOCK) { r -> msg = Msg(Tone.SUCCESS, "${pieces(r.qty!!)} added — ${piecesLeft(r.remaining!!)}") }
+        recover(KEY_RESTOCK) { r -> msg = Msg(Tone.SUCCESS, "${pieces(r.qty!!)} added — now ${pieces(r.remaining!!)} in stock"); restocked = r.qty }
         recover(KEY_DELETE) { deleted = true }
         recover(KEY_CORRECT) { r -> msg = Msg(Tone.SUCCESS, "Stock corrected — ${piecesLeft(r.remaining!!)}") }
     }
@@ -97,7 +99,7 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
         clearResult()
         val n = restockQty
         op(KEY_RESTOCK, { repo.restock(it, id, n) }) { r ->
-            if (r.ok) { msg = Msg(Tone.SUCCESS, "${pieces(n)} added — ${piecesLeft(r.remaining!!)}"); restocked = n; setRestock(1) } else msg = failMsg(r.code)
+            if (r.ok) { msg = Msg(Tone.SUCCESS, "${pieces(n)} added — now ${pieces(r.remaining!!)} in stock"); restocked = n; setRestock(1) } else msg = failMsg(r.code)
         }
     }
 
@@ -171,6 +173,14 @@ class VariantViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, 
     }
 }
 
+@Composable
+private fun AddStockCard(vm: VariantViewModel, variant: com.cnanjappa.inventory.data.Variant) {
+    SectionCard(title = "Add stock", subtitle = "Now in stock: ${pieces(variant.qty)}") {
+        QtyStepper(vm.restockQty, vm::setRestock, min = 1, label = "Pieces received")
+        BigButton("Add stock", vm::restock, enabled = !vm.busy)
+    }
+}
+
 private val REASONS = listOf("Count correction", "Damaged", "Lost", "Other")
 
 @Composable
@@ -210,6 +220,10 @@ fun VariantScreen(nav: NavHostController) {
                 MessageCard(m) {
                     // Straight back to Sell/Return, skipping the product list it came through.
                     if (vm.backToScanner) BigButton("Back to scanner", { nav.popBackStack(Routes.SCAN, inclusive = false) })
+                    if (vm.restockMode && vm.restocked != null) {
+                        BigButton("Scan next item", { nav.navigate(Routes.scan(ScanMode.RESTOCK)) { popUpTo(Routes.VARIANT) { inclusive = true } } })
+                        SecondaryButton("Done", { nav.back() })
+                    }
                     vm.lastSaleId?.let { SecondaryButton("Undo", vm::undo, enabled = !vm.busy) }
                     vm.restocked?.let { n -> SecondaryButton("Generate labels for these $n", { nav.go(Routes.labels(vm.id, n)) }) }
                     vm.takenBy?.let { other ->
@@ -218,6 +232,8 @@ fun VariantScreen(nav: NavHostController) {
                     }
                 }
             }
+
+            if (vm.restockMode) AddStockCard(vm, variant)
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 BigButton("Sell 1", vm::sell, Modifier.weight(1f), icon = Icons.Default.RemoveShoppingCart, enabled = !vm.busy && variant.qty > 0)
@@ -228,10 +244,7 @@ fun VariantScreen(nav: NavHostController) {
             }
             if (variant.qty == 0) FieldHint("No pieces available")
 
-            SectionCard(title = "Add stock", subtitle = "New pieces of this exact item") {
-                QtyStepper(vm.restockQty, vm::setRestock, min = 1, label = "Pieces received")
-                BigButton("Add stock", vm::restock, enabled = !vm.busy)
-            }
+            if (!vm.restockMode) AddStockCard(vm, variant)
 
             SectionCard(title = "Correct stock", subtitle = "Counting errors, losses, damaged pieces") { CorrectSection(vm, variant) }
 

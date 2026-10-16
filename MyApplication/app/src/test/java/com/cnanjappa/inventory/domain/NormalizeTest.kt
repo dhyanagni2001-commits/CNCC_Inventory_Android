@@ -36,8 +36,27 @@ class NormalizeTest {
         assertNull(Sizes.canonical("   "))
     }
 
+    @Test fun dhotiWaistSizesAreTheirOwnType() {
+        listOf("M/24-38", "m / 24–38", "24-38", "M(24-38)", "24-38 in").forEach {
+            val s = Sizes.canonical(it)!!
+            assertEquals(it, SizeType.WAIST, s.type); assertEquals(it, "W:24-38", s.key)
+        }
+        assertEquals("M/24–38", Sizes.canonical("m/24-38")!!.label)
+        assertEquals("L/40–46", Sizes.canonical("L/40-46")!!.label)
+        // A waist range is never the letter M, an age, or a number.
+        assertNotEquals(Sizes.canonical("M")!!.key, Sizes.canonical("M/24-38")!!.key)
+        assertNotEquals(Sizes.canonical("40")!!.key, Sizes.canonical("40-46")!!.key)
+        assertEquals(SizeType.AGE, Sizes.canonical("18-20")!!.type)
+        assertEquals(SizeType.AGE, Sizes.canonical("10-11")!!.type)
+        Sizes.WAISTS.forEach { assertEquals(SizeType.WAIST, Sizes.canonical(it)!!.type) }
+    }
+
+    @Test fun everyStandardChoiceIsInItsOwnTab() {
+        Sizes.STANDARD.forEach { (type, list) -> list.forEach { assertEquals(it, type, Sizes.canonical(it)!!.type) } }
+    }
+
     @Test fun sortOrderIsLettersNumbersAgesCustom() {
-        val sorts = listOf("XXXL", "36", "0-1", "Free").map { Sizes.canonical(it)!!.sort }
+        val sorts = listOf("XXXL", "36", "0-1", "18-20", "M/24-38", "L/40-46", "Free").map { Sizes.canonical(it)!!.sort }
         assertEquals(sorts.sorted(), sorts)
         assertTrue(Sizes.canonical("S")!!.sort < Sizes.canonical("M")!!.sort)
     }

@@ -6,15 +6,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddBox
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.AddBox
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -163,11 +164,8 @@ fun StockScreen(nav: NavHostController) {
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                ExcelPanel()
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SecondaryButton("Add product", { nav.go(Routes.form()) }, Modifier.weight(1f), Icons.Default.AddBox)
-                    SecondaryButton("Scan to add stock", { nav.go(Routes.scan(ScanMode.RESTOCK)) }, Modifier.weight(1f), Icons.Default.QrCodeScanner)
-                }
+                BigButton("Scan to add stock", { nav.go(Routes.scan(ScanMode.RESTOCK)) }, Modifier.fillMaxWidth(), icon = Icons.Default.QrCodeScanner)
+                ExcelPanel { SecondaryButton("Add product", { nav.go(Routes.form()) }, Modifier.weight(1f).fillMaxHeight(), Icons.Default.AddBox, contentPadding = PairPadding) }
                 Text(total?.let { "${pieces(it)} in stock" } ?: "Stock", style = MaterialTheme.typography.headlineMedium)
                 val sold = today.firstOrNull { it.type == MoveType.SALE }?.pieces ?: 0
                 val returned = today.filter { it.type == MoveType.RETURN || it.type == MoveType.RETURN_DAMAGED }.sumOf { it.pieces }

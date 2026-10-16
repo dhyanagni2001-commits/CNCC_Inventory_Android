@@ -101,7 +101,7 @@ object Routes {
     const val PRODUCTS = "products?pickRaw={pickRaw}&pickFmt={pickFmt}"
     const val STOCK = "stock"
     const val SCAN = "scan/{mode}?variant={variant}"
-    const val VARIANT = "variant/{id}?linkRaw={linkRaw}&linkFmt={linkFmt}"
+    const val VARIANT = "variant/{id}?linkRaw={linkRaw}&linkFmt={linkFmt}&restock={restock}"
     const val RETURN = "return/{id}"
     const val FORM = "form?copy={copy}&edit={edit}&codeRaw={codeRaw}&codeFmt={codeFmt}"
     const val LABELS = "labels/{id}?count={count}"
@@ -113,6 +113,8 @@ object Routes {
     fun scan(mode: ScanMode, variant: Long? = null) = "scan/${mode.name}" + (variant?.let { "?variant=$it" } ?: "")
     fun variant(id: Long, linkRaw: String? = null, linkFmt: String? = null) =
         "variant/$id" + if (linkRaw != null) "?linkRaw=${Uri.encode(linkRaw)}&linkFmt=$linkFmt" else ""
+    /** Opened by a "Scan to add stock" scan: the page leads with Add stock. */
+    fun restockItem(id: Long) = "variant/$id?restock=true"
     fun returnItem(id: Long) = "return/$id"
     fun form(copy: Long? = null, edit: Long? = null, codeRaw: String? = null, codeFmt: String? = null) = buildString {
         append("form?")
@@ -295,7 +297,8 @@ private fun NavGraph(nav: NavHostController, pad: PaddingValues) {
         composable(Routes.PRODUCTS, arguments = listOf(str("pickRaw"), str("pickFmt"))) { ProductsScreen(nav) }
         composable(Routes.STOCK) { StockScreen(nav) }
         composable(Routes.SCAN, arguments = listOf(navArgument("mode") { type = NavType.StringType }, long("variant"))) { ScanScreen(nav) }
-        composable(Routes.VARIANT, arguments = listOf(navArgument("id") { type = NavType.LongType }, str("linkRaw"), str("linkFmt"))) { VariantScreen(nav) }
+        composable(Routes.VARIANT, arguments = listOf(navArgument("id") { type = NavType.LongType }, str("linkRaw"), str("linkFmt"),
+            navArgument("restock") { type = NavType.BoolType; defaultValue = false })) { VariantScreen(nav) }
         composable(Routes.RETURN, arguments = listOf(navArgument("id") { type = NavType.LongType })) { ReturnScreen(nav) }
         composable(Routes.FORM, arguments = listOf(long("copy"), long("edit"), str("codeRaw"), str("codeFmt"))) { FormScreen(nav) }
         composable(Routes.LABELS, arguments = listOf(navArgument("id") { type = NavType.LongType }, navArgument("count") { type = NavType.IntType; defaultValue = 1 })) { LabelsScreen(nav) }

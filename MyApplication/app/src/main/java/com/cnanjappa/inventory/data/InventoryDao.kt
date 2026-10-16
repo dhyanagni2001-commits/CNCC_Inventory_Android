@@ -75,6 +75,10 @@ interface InventoryDao {
     )
     suspend fun upperCaseText()
 
+    /** Live items whose size was saved as a range or free text: the only ones a size-rule change can re-key. */
+    @Query("SELECT * FROM variants WHERE archived = 0 AND (sizeKey LIKE 'A:%' OR sizeKey LIKE 'C:%')")
+    suspend fun rangeOrCustomSizes(): List<Variant>
+
     /** Items hidden by the old Archive button: still holding barcodes and their identity. */
     @Query("SELECT id FROM variants WHERE archived = 1 AND identityKey NOT LIKE 'deleted:%'")
     suspend fun unfinishedDeletes(): List<Long>

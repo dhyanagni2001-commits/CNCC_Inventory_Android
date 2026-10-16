@@ -7,37 +7,35 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Surface
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AssignmentReturn
-import androidx.compose.material.icons.filled.AddBox
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.SavedStateHandle
@@ -110,32 +108,29 @@ class ExcelViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, ha
     fun dismissExcel() { excel = ExcelState.Idle }
 }
 
+/** Tighter sides than a normal button so two fit one line each on a small phone. */
+val PairPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+
 const val XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-/** Home: only the three daily actions. Stock, Excel and history live elsewhere. */
+/** Home: Sell fills the screen (the action used all day); Return is a small button under it. */
 @Composable
 fun HomeScreen(nav: NavHostController) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+        Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        HeroTile(
-            "Sell", "Scan a label to sell 1 piece", Icons.Default.QrCodeScanner,
-        ) { nav.go(Routes.scan(ScanMode.SELL)) }
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.height(IntrinsicSize.Max)) {
-            ActionTile("Return", "Put a sold item back", Icons.AutoMirrored.Filled.AssignmentReturn, Modifier.weight(1f).fillMaxHeight()) {
-                nav.go(Routes.scan(ScanMode.RETURN))
-            }
-            ActionTile("Add Product", "New item or delivery", Icons.Default.AddBox, Modifier.weight(1f).fillMaxHeight()) {
-                nav.go(Routes.form())
-            }
-        }
+        SellTile(Modifier.weight(1f)) { nav.go(Routes.scan(ScanMode.SELL)) }
+        SecondaryButton("Return an item", { nav.go(Routes.scan(ScanMode.RETURN)) }, Modifier.fillMaxWidth().heightIn(min = 56.dp), Icons.AutoMirrored.Filled.AssignmentReturn)
     }
 }
 
-/** "Excel report" button plus its progress / saved / failed card; shown at the top of the Stock tab. */
+/**
+ * "Excel report" button (with [beside] sharing its row) plus its progress / saved / failed card;
+ * shown at the top of the Stock tab.
+ */
 @Composable
-fun ExcelPanel() {
+fun ExcelPanel(beside: @Composable RowScope.() -> Unit = {}) {
     val vm = appViewModel { c, h -> ExcelViewModel(c, h) }
     val context = LocalContext.current
     val saveExcel = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(XLSX_MIME)) { vm.saveExcel(context, it) }
@@ -144,10 +139,15 @@ fun ExcelPanel() {
         if (excel is ExcelState.Ready && !vm.pickerOpened) { vm.pickerOpened = true; saveExcel.launch(excel.name) }
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        ActionTile(
-            "Excel report", "Save the full stock report as Excel", Icons.Default.TableChart, Modifier.fillMaxWidth(),
-            enabled = excel !is ExcelState.Preparing, minHeight = 0,
-        ) { vm.startExcel(context) }
+        // Occasional office task: a small button, so daily stock actions stay the big ones.
+        // Equal pair: same width and height (fillMaxHeight in [beside] too), even if large text wraps one.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(IntrinsicSize.Max)) {
+            SecondaryButton(
+                "Excel report", { vm.startExcel(context) }, Modifier.weight(1f).fillMaxHeight(), Icons.Default.TableChart,
+                enabled = excel !is ExcelState.Preparing, contentPadding = PairPadding,
+            )
+            beside()
+        }
         AnimatedVisibility(excel !is ExcelState.Idle) {
             when (excel) {
                 is ExcelState.Preparing -> MessageCard(Msg(Tone.INFO, "Preparing Excel report…", excel.stage)) {
@@ -169,33 +169,24 @@ fun ExcelPanel() {
     }
 }
 
-/** The main daily action: a large filled tile. */
+/**
+ * The main daily action: one huge tile. Colours come from the theme pair primary/onPrimary, so text
+ * stays high-contrast in both modes (white on deep blue in light, dark navy on light blue in dark).
+ */
 @Composable
-private fun HeroTile(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
+private fun SellTile(modifier: Modifier, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
     Surface(
-        onClick = onClick, shape = CardShape, color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 148.dp),
+        onClick = onClick, shape = CardShape, color = scheme.primary, contentColor = scheme.onPrimary,
+        modifier = modifier.fillMaxWidth().heightIn(min = 260.dp),
     ) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            IconBadge(icon, Color.White, Color.White.copy(alpha = 0.18f), 52)
-            Spacer(Modifier.height(18.dp))
-            Text(title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
-            Text(subtitle, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.85f))
-        }
-    }
-}
-
-@Composable
-private fun ActionTile(title: String, subtitle: String, icon: ImageVector, modifier: Modifier, enabled: Boolean = true, minHeight: Int = 120, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick, enabled = enabled, shape = CardShape, color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = modifier.heightIn(min = minHeight.dp),
-    ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            IconBadge(icon, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, 44)
-            Spacer(Modifier.height(8.dp))
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+        ) {
+            IconBadge(Icons.Default.QrCodeScanner, scheme.onPrimary, scheme.onPrimary.copy(alpha = 0.12f), 120)
+            Text("Sell", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold, color = scheme.onPrimary)
+            Text("Scan a label to sell 1 piece", style = MaterialTheme.typography.titleMedium, color = scheme.onPrimary.copy(alpha = 0.85f), textAlign = TextAlign.Center)
         }
     }
 }

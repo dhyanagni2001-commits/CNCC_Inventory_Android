@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -216,7 +217,10 @@ fun BigButton(
 }
 
 @Composable
-fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: ImageVector? = null, enabled: Boolean = true) {
+fun SecondaryButton(
+    text: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: ImageVector? = null, enabled: Boolean = true,
+    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+) {
     val source = remember { MutableInteractionSource() }
     OutlinedButton(
         onClick = onClick,
@@ -226,6 +230,7 @@ fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modi
         shape = ButtonShape,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+        contentPadding = contentPadding,
     ) {
         if (icon != null) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)

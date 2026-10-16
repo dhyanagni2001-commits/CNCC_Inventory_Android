@@ -3,6 +3,7 @@ package com.cnanjappa.inventory.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +19,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,6 +67,7 @@ import com.cnanjappa.inventory.domain.NAME_MAX
 import com.cnanjappa.inventory.domain.NOTES_MAX
 import com.cnanjappa.inventory.domain.SIZE_MAX
 import com.cnanjappa.inventory.domain.ScannedCode
+import com.cnanjappa.inventory.domain.SizeType
 import com.cnanjappa.inventory.domain.Sizes
 import com.cnanjappa.inventory.domain.Sleeve
 import com.cnanjappa.inventory.domain.Validate
@@ -118,7 +123,7 @@ class FormViewModel(c: Container, handle: SavedStateHandle) : OpViewModel(c, han
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val colours = repo.dao.colours(100).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val extraSizes = repo.dao.extraSizes(
-        (Sizes.LETTERS + Sizes.NUMBERS + Sizes.AGES).map { Sizes.canonical(it)!!.key },
+        Sizes.STANDARD.values.flatten().map { Sizes.canonical(it)!!.key },
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -452,33 +457,58 @@ private fun ComboField(label: String, value: String, options: List<String>, max:
     FieldHint(error)
 }
 
+/**
+ * One size system at a time: Letter / Number / Age / Waist tabs, each with one-tap choices plus the
+ * shop's saved sizes of that kind. Switching tabs never clears the chosen size, which stays shown above.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SizeField(vm: FormViewModel) {
     val extra by vm.extraSizes.collectAsStateWithLifecycle()
-    var ages by rememberSaveable { mutableStateOf(Sizes.canonical(vm.size)?.type == com.cnanjappa.inventory.domain.SizeType.AGE) }
+    val chosen = Sizes.canonical(vm.size)
+    val savedByType = extra.groupBy { Sizes.canonical(it)?.type ?: SizeType.CUSTOM }
+    val tabs = SizeType.entries.filter { it != SizeType.CUSTOM || savedByType[it] != null }
+    var tab by rememberSaveable { mutableStateOf((chosen?.type ?: SizeType.LETTER).name) }
+    val current = SizeType.valueOf(tab).takeIf { it in tabs } ?: SizeType.LETTER
     var adding by rememberSaveable { mutableStateOf(false) }
     var typed by rememberSaveable { mutableStateOf("") }
-    val selectedKey = Sizes.canonical(vm.size)?.key
-    fun pick(s: String) { vm.update { size = if (Sizes.canonical(s)?.key == selectedKey) "" else s } }
-    @Composable fun option(s: String, text: String = s) = ChoiceButton(text, Sizes.canonical(s)?.key == selectedKey, { pick(s) })
-    Text("Letter sizes", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    ChoiceRow { Sizes.LETTERS.forEach { option(it, Sizes.LETTER_HINTS[it]?.let { h -> "$it ($h)" } ?: it) } }
-    Text("Number sizes", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    ChoiceRow { Sizes.NUMBERS.forEach { option(it) } }
-    SecondaryButton(if (ages) "Hide age sizes" else "Age sizes (years)", { ages = !ages })
-    if (ages) ChoiceRow { Sizes.AGES.forEach { option(it, "$it yrs") } }
-    if (extra.isNotEmpty()) {
-        Text("Saved sizes", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        ChoiceRow { extra.forEach { option(it) } }
+    fun pick(s: String) { vm.update { size = if (Sizes.canonical(s)?.key == chosen?.key) "" else s } }
+
+    if (chosen != null) Text("Chosen: ${chosen.label}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+    PrimaryTabRow(selectedTabIndex = tabs.indexOf(current), containerColor = Color.Transparent) {
+        tabs.forEach { t ->
+            // Content overload: no built-in side padding, so "Number" fits four tabs on a small phone.
+            Tab(
+                t == current, { tab = t.name }, Modifier.heightIn(min = 52.dp),
+                selectedContentColor = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Text(t.tab, style = MaterialTheme.typography.bodyLarge, fontWeight = if (t == current) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, softWrap = false)
+            }
+        }
     }
-    val c = Sizes.canonical(vm.size)
-    if (c != null && listOf(Sizes.LETTERS, Sizes.NUMBERS, Sizes.AGES, extra).none { l -> l.any { Sizes.canonical(it)?.key == c.key } }) {
-        ChoiceRow { ChoiceButton(c.label, true, { pick(vm.size) }) }
+    Text(current.caption, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val options = Sizes.STANDARD.getValue(current) + savedByType[current].orEmpty()
+    ChoiceRow {
+        options.forEach { s ->
+            val text = when (current) {
+                SizeType.LETTER -> Sizes.LETTER_HINTS[s]?.let { h -> "$s ($h)" } ?: s
+                SizeType.AGE -> if (s in Sizes.AGES) "$s yrs" else s
+                else -> s
+            }
+            ChoiceButton(text, Sizes.canonical(s)?.key == chosen?.key, { pick(s) })
+        }
     }
     if (!adding) SecondaryButton("Add size", { adding = true })
     else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(typed, { typed = caps(it).take(SIZE_MAX) }, Modifier.weight(1f), singleLine = true, placeholder = { Text("e.g. 32 or Free Size") }, keyboardOptions = CapsKeyboard)
-        SecondaryButton("Use size", { if (typed.isNotBlank()) { vm.update { size = typed.trim() }; typed = ""; adding = false } })
+        OutlinedTextField(typed, { typed = caps(it).take(SIZE_MAX) }, Modifier.weight(1f), singleLine = true, placeholder = { Text("e.g. 32, XL/46-52, Free Size") }, keyboardOptions = CapsKeyboard)
+        SecondaryButton("Use size", {
+            if (typed.isNotBlank()) {
+                vm.update { size = typed.trim() }
+                Sizes.canonical(typed)?.let { tab = it.type.name }
+                typed = ""; adding = false
+            }
+        })
     }
     FieldHint(vm.error(Field.SIZE))
 }
