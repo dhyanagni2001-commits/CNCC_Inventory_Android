@@ -257,6 +257,8 @@ fun MainNav() {
                         NavigationBarItem(
                             selected = route == r,
                             onClick = {
+                                // Already on this tab: nothing to do. Navigating anyway rebuilds Home and replays its fade-in.
+                                if (route == r) return@NavigationBarItem
                                 nav.navigate(r) {
                                     popUpTo(nav.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
